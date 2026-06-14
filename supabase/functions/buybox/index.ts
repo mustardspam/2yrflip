@@ -18,7 +18,7 @@ const RENTCAST_KEY = Deno.env.get("RENTCAST_KEY") ?? "";
 const ALLOWED_ORIGIN = Deno.env.get("ALLOWED_ORIGIN") ?? "*";
 const RENTCAST_BASE = "https://api.rentcast.io/v1";
 const FEMA_NFHL =
-  "https://hazards.fema.gov/gis/nfhl/rest/services/public/NFHL/MapServer/28/query";
+  "https://hazards.fema.gov/arcgis/rest/services/public/NFHL/MapServer/28/query";
 
 function cors(origin: string) {
   return {
