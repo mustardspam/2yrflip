@@ -5,8 +5,10 @@ harvest equity tax-free under **IRC §121** ($250K single / $500K married-filing
 personal build's lot cost, construction cost, and local comps, and the tool projects net proceeds
 and lets you compare multiple ZIP markets side-by-side to find the highest-gain play.
 
-No accounts, no server, no build step — a single `index.html` plus static CSS/JS. Open it from
-`file://` or deploy it to GitHub Pages with one push.
+The core calculator is no accounts, no server, no build step — a single `index.html` plus static
+CSS/JS. Open it from `file://` or deploy it to GitHub Pages with one push. The optional **Buy Box**
+tab adds a single free serverless function (Supabase Edge Function) for live listing data; it runs
+in mock mode until you deploy that.
 
 > ⚠️ **Estimates only — not tax advice.** Confirm §121 eligibility (2-of-5-year use/ownership test,
 > once-every-2-years limit) and tax treatment with a CPA before acting.
@@ -25,6 +27,9 @@ No accounts, no server, no build step — a single `index.html` plus static CSS/
 - **Side-by-side comparison** — pick up to 4 scenarios; highest value per row is highlighted.
 - **ZIP appreciation defaults** — Houston-area lookup table; unknown ZIPs fall back to 3.5%.
 - **Copy summary** — plain-text deal memo to clipboard; clean print/PDF stylesheet.
+- **Buy Box** — drop a Zillow URL (or enter manually); get a **Maximum Allowable Offer**, a
+  0–100 deal **score**, and a green/yellow/red verdict from comps, build cost, closing costs,
+  §121 fit, and FEMA flood zone. See [Buy Box](#buy-box) below.
 
 ---
 
@@ -71,13 +76,18 @@ Every later `git push` to `main` auto-redeploys.
     compare.css       comparison table
     print.css         print / print-to-PDF stylesheet
   js/
+    config.js         Buy Box backend wiring (public-safe; mock toggle)
     utils.js          formatting + DOM helpers (window.Utils)
     zipDefaults.js    Houston ZIP → appreciation rate table (window.ZipDefaults)
     storage.js        localStorage persistence (window.Store)
     calculator.js     calc engine + results/meter + deal memo (window.Calculator)
     scenarios.js      saved scenario cards (window.Scenarios)
     compare.js        side-by-side comparison (window.Compare)
+    buybox.js         Buy Box tab: intake, MAO, scoring, verdict (window.BuyBox)
     app.js            tab router (registerTab pattern) + shell (window.App)
+  supabase/
+    functions/buybox/index.ts   Edge Function: URL→address, RentCast + FEMA proxy
+    README.md                   backend deploy + secrets guide
   README.md
 ```
 
@@ -113,6 +123,46 @@ secondary "estimated tax on excess" line at the 15% long-term capital-gains rate
 - **localStorage key:** `s121_scenarios` (JSON array of scenario objects).
 
 ---
+
+## Buy Box
+
+The **Buy Box** tab evaluates a prospective purchase (a lot or teardown you'd build on):
+
+1. Paste a **Zillow URL** and hit **Analyze** — or type the address/price/comps by hand.
+2. It pulls listing facts + comparable sales (RentCast) and the **FEMA flood zone**, then
+   computes a **Maximum Allowable Offer (MAO)** — the most you can pay and still hit your target
+   profit while staying §121-friendly — plus a **0–100 score** and a **Pursue / Maybe / Pass**
+   verdict.
+3. **Save** analyses (localStorage key `s121_buybox`) or **Send to Calculator** to model deeper.
+
+**MAO formula** (acquisition closing is a % of the price, hence the divisor):
+```
+ARV          = plannedSqft × compMedian$/sqft × (1+appr)^(hold/12)
+MAO          = (ARV − buildCost − demo − sellClosing − targetProfit) / (1 + acqClosing%)
+gap          = MAO − askingPrice          (positive = room to buy)
+score (100)  = margin(50) + ARV-confidence(15) + §121-fit(15) + flood(20)
+verdict      = score ≥ 75 & gap > 0 → Pursue · ≥ 50 → Maybe · else Pass
+```
+
+### Backend (required for live data)
+
+Live data flows through a **Supabase Edge Function** (`supabase/functions/buybox`) so your
+RentCast API key stays server-side and CORS is handled. The frontend ships in **mock mode**
+(`js/config.js` → `USE_MOCK: true`) so the tab is fully usable before you deploy.
+
+To go live: deploy the function and fill in `js/config.js`. Full steps in
+[`supabase/README.md`](supabase/README.md). Quick version:
+```bash
+supabase login
+supabase link --project-ref <YOUR_PROJECT_REF>
+supabase secrets set RENTCAST_KEY=...   ALLOWED_ORIGIN=https://mustardspam.github.io
+supabase functions deploy buybox
+# then set FUNCTION_URL + SUPABASE_ANON_KEY and USE_MOCK:false in js/config.js
+```
+
+> **ToS note:** the function only parses the address out of the Zillow URL slug — it does **not**
+> scrape Zillow page content. All property data comes from licensed APIs (RentCast) and public
+> government data (FEMA NFHL).
 
 ## Phase 2 (designed for, not built)
 

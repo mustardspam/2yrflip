@@ -1,0 +1,11 @@
+# Minimal Supabase config for the buybox Edge Function.
+# `supabase link` / `supabase init` will expand this; the [functions] block
+# below is what matters for deploying buybox.
+
+project_id = "2yrflip"
+
+[functions.buybox]
+# The client sends the project anon key as a Bearer token, which is a valid JWT,
+# so JWT verification can stay on. Set to false only if you want a fully public
+# endpoint with no key at all.
+verify_jwt = true

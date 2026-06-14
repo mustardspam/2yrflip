@@ -87,6 +87,11 @@
     registerTab(window.Calculator.tab.id, window.Calculator.tab.label,
       function (panel) { window.Calculator.tab.init(panel, refreshAll); });
 
+    if (window.BuyBox) {
+      registerTab(window.BuyBox.tab.id, window.BuyBox.tab.label,
+        function (panel) { window.BuyBox.tab.init(panel); });
+    }
+
     registerTab(window.Compare.tab.id, window.Compare.tab.label,
       function (panel) { window.Compare.tab.init(panel); });
 

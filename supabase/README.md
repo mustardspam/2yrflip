@@ -1,0 +1,70 @@
+# 2yrflip — Buy Box backend (Supabase Edge Function)
+
+The `buybox` Edge Function is the data proxy for the Buy Box tab. It parses the address
+from a Zillow URL, pulls listing facts + comparable sales from **RentCast**, looks up the
+**FEMA** flood zone, and returns one normalized JSON payload. Your RentCast key stays a
+server-side secret; the browser only ever talks to this function.
+
+> The frontend (GitHub Pages) works in **mock mode** without this deployed. Deploy when you
+> want live data.
+
+## One-time setup
+
+1. **Install the Supabase CLI** (if you haven't): https://supabase.com/docs/guides/cli
+2. **Get a free RentCast API key:** https://www.rentcast.io/api  (free tier ~50 req/mo)
+3. From the repo root, link the function project to your Supabase project:
+   ```bash
+   supabase login
+   supabase link --project-ref <YOUR_PROJECT_REF>
+   ```
+   (`<YOUR_PROJECT_REF>` is the subdomain in your project URL: `https://<ref>.supabase.co`.)
+
+## Set secrets
+
+```bash
+supabase secrets set RENTCAST_KEY=your_rentcast_key_here
+# Lock CORS to your Pages origin (recommended). Use * only for local testing.
+supabase secrets set ALLOWED_ORIGIN=https://mustardspam.github.io
+```
+
+## Deploy
+
+```bash
+supabase functions deploy buybox
+```
+
+After deploy your endpoint is:
+```
+https://<YOUR_PROJECT_REF>.supabase.co/functions/v1/buybox
+```
+
+## Wire up the frontend
+
+Edit `js/config.js` in the repo root and fill in:
+```js
+window.BUYBOX_CONFIG = {
+  FUNCTION_URL: "https://<YOUR_PROJECT_REF>.supabase.co/functions/v1/buybox",
+  SUPABASE_ANON_KEY: "<your-anon-public-key>",  // public-safe, find in Project Settings → API
+  USE_MOCK: false
+};
+```
+Set `USE_MOCK: true` any time you want to demo the tab without calling the API.
+
+## Test the function directly
+
+```bash
+curl -X POST "https://<ref>.supabase.co/functions/v1/buybox" \
+  -H "Authorization: Bearer <anon-key>" \
+  -H "Content-Type: application/json" \
+  -d '{"url":"https://www.zillow.com/homedetails/123-Main-St-Houston-TX-77007/12345678_zpid/"}'
+```
+
+## Notes
+
+- **ToS-safe:** the function only parses the address out of the Zillow URL slug — it does not
+  fetch or scrape Zillow page content. All property data comes from licensed APIs (RentCast)
+  and public government data (FEMA).
+- **Swappable provider:** RentCast is isolated in `getListing()` / `getComps()`. To switch to
+  ATTOM, Bridge/MLS, etc., change those two functions; the response shape stays the same.
+- **Free tiers:** RentCast ~50 req/mo; Supabase Edge Functions 500K invocations/mo. The
+  frontend caches lookups by address in `localStorage` to conserve quota.
