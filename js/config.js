@@ -17,6 +17,5 @@ window.BUYBOX_CONFIG = {
 
   // true  = use built-in sample data (no API calls) — great for demos / pre-deploy
   // false = call the live Edge Function
-  // Flip to false AFTER the buybox function is deployed (Phase C).
-  USE_MOCK: true
+  USE_MOCK: false
 };
