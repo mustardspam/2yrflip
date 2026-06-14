@@ -9,11 +9,9 @@
 //   3. FEMA NFHL: flood zone by lat/long (free, keyless).
 //   4. Return one normalized JSON payload to the browser.
 //
-// Secrets (set via `supabase secrets set`):
+// Secrets (set in dashboard → Edge Functions → Secrets):
 //   RENTCAST_KEY   — RentCast API key (required for live data)
 //   ALLOWED_ORIGIN — e.g. https://mustardspam.github.io (CORS lock)
-//
-// Deploy:  supabase functions deploy buybox
 // ============================================================
 
 const RENTCAST_KEY = Deno.env.get("RENTCAST_KEY") ?? "";
@@ -32,9 +30,6 @@ function cors(origin: string) {
 }
 
 // ---- Zillow URL -> address ---------------------------------
-// Zillow detail URLs look like:
-//   https://www.zillow.com/homedetails/123-Main-St-Houston-TX-77007/12345678_zpid/
-// The address is in the slug. We parse it; no page fetch.
 function addressFromZillowUrl(url: string): string | null {
   try {
     const u = new URL(url);
@@ -42,9 +37,7 @@ function addressFromZillowUrl(url: string): string | null {
       || u.pathname.match(/\/homedetails\/([^/]+)\//i);
     if (!m) return null;
     let slug = decodeURIComponent(m[1]);
-    // "123-Main-St-Houston-TX-77007" -> "123 Main St Houston TX 77007"
     slug = slug.replace(/-/g, " ").replace(/\s+/g, " ").trim();
-    // Normalize trailing "TX 77007" spacing is already fine for RentCast.
     return slug.length > 6 ? slug : null;
   } catch {
     return null;
@@ -63,54 +56,56 @@ function median(nums: number[]): number {
   return s.length % 2 ? s[mid] : (s[mid - 1] + s[mid]) / 2;
 }
 
-// ---- RentCast helpers --------------------------------------
-async function rcGet(path: string): Promise<any | null> {
-  if (!RENTCAST_KEY) return null;
+// ---- RentCast helpers (with diagnostics) -------------------
+async function rcGet(path: string, dbg: string[]): Promise<any | null> {
+  const tag = path.split("?")[0];
+  if (!RENTCAST_KEY) { dbg.push(`${tag}:NO_KEY`); return null; }
   try {
     const res = await fetch(`${RENTCAST_BASE}${path}`, {
       headers: { "X-Api-Key": RENTCAST_KEY, accept: "application/json" },
     });
+    dbg.push(`${tag}:${res.status}`);
     if (!res.ok) return null;
     return await res.json();
-  } catch {
+  } catch (e) {
+    dbg.push(`${tag}:ERR`);
     return null;
   }
 }
 
-async function getListing(address: string) {
-  // Sale listing: asking price + facts + coords
+async function getListing(address: string, dbg: string[]) {
   const q = encodeURIComponent(address);
-  const listing = await rcGet(`/listings/sale?address=${q}`);
+  const listing = await rcGet(`/listings/sale?address=${q}`, dbg);
   const row = Array.isArray(listing) ? listing[0] : listing;
-  if (!row) {
-    // Fall back to property record (no asking price, but coords/sqft/lot)
-    const prop = await rcGet(`/properties?address=${q}`);
-    const p = Array.isArray(prop) ? prop[0] : prop;
-    if (!p) return null;
+  if (row) {
     return {
-      askingPrice: p.lastSalePrice ?? null,
-      existingSqft: p.squareFootage ?? null,
-      lotSizeSqft: p.lotSize ?? null,
-      lat: p.latitude ?? null,
-      lng: p.longitude ?? null,
-      propertyType: p.propertyType ?? null,
+      askingPrice: row.price ?? null,
+      existingSqft: row.squareFootage ?? null,
+      lotSizeSqft: row.lotSize ?? null,
+      lat: row.latitude ?? null,
+      lng: row.longitude ?? null,
+      propertyType: row.propertyType ?? null,
     };
   }
+  // Fall back to property record (no asking price, but facts/coords)
+  const prop = await rcGet(`/properties?address=${q}`, dbg);
+  const p = Array.isArray(prop) ? prop[0] : prop;
+  if (!p) return null;
   return {
-    askingPrice: row.price ?? null,
-    existingSqft: row.squareFootage ?? null,
-    lotSizeSqft: row.lotSize ?? null,
-    lat: row.latitude ?? null,
-    lng: row.longitude ?? null,
-    propertyType: row.propertyType ?? null,
+    askingPrice: p.lastSalePrice ?? null,
+    existingSqft: p.squareFootage ?? null,
+    lotSizeSqft: p.lotSize ?? null,
+    lat: p.latitude ?? null,
+    lng: p.longitude ?? null,
+    propertyType: p.propertyType ?? null,
   };
 }
 
-async function getComps(address: string, sqft: number | null, propertyType: string | null) {
+async function getComps(address: string, sqft: number | null, propertyType: string | null, dbg: string[]) {
   const params = new URLSearchParams({ address });
   if (sqft) params.set("squareFootage", String(sqft));
   if (propertyType) params.set("propertyType", propertyType);
-  const avm = await rcGet(`/avm/value?${params.toString()}`);
+  const avm = await rcGet(`/avm/value?${params.toString()}`, dbg);
   if (!avm) return null;
   const comps = Array.isArray(avm.comparables) ? avm.comparables : [];
   const perSqft = comps
@@ -175,7 +170,6 @@ Deno.serve(async (req) => {
   let body: any = {};
   try { body = await req.json(); } catch { /* ignore */ }
 
-  // Accept either a Zillow URL or a raw address
   let address: string | null = body.address ?? null;
   if (!address && body.url) address = addressFromZillowUrl(String(body.url));
   if (!address) {
@@ -186,21 +180,23 @@ Deno.serve(async (req) => {
 
   if (!RENTCAST_KEY) {
     return new Response(JSON.stringify({
-      error: "Server missing RENTCAST_KEY. Set it with `supabase secrets set RENTCAST_KEY=...`.",
+      error: "Server missing RENTCAST_KEY. Set it in Edge Functions → Secrets.",
       address,
     }), { status: 503, headers });
   }
 
-  const listing = await getListing(address);
+  const dbg: string[] = [];
+  const listing = await getListing(address, dbg);
   if (!listing) {
     return new Response(JSON.stringify({
       error: "No property data found for that address. Try the manual-entry path.",
       address,
+      debug: { hasKey: !!RENTCAST_KEY, keyLen: RENTCAST_KEY.length, calls: dbg },
     }), { status: 404, headers });
   }
 
   const [comps, flood] = await Promise.all([
-    getComps(address, listing.existingSqft, listing.propertyType),
+    getComps(address, listing.existingSqft, listing.propertyType, dbg),
     (listing.lat != null && listing.lng != null)
       ? getFloodZone(listing.lat, listing.lng)
       : Promise.resolve({ floodZone: "UNKNOWN", floodDesc: "No coordinates for flood lookup" }),
@@ -218,6 +214,7 @@ Deno.serve(async (req) => {
     comps: comps ?? { medianPerSqft: 0, count: 0, lowPerSqft: 0, highPerSqft: 0, asOf: null },
     floodZone: flood.floodZone,
     floodDesc: flood.floodDesc,
+    debug: { calls: dbg },
   };
 
   return new Response(JSON.stringify(payload), { headers });
