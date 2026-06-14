@@ -1,0 +1,231 @@
+/* ============================================================
+   main.css — design tokens, reset, header/tabs, layout shell
+   ============================================================ */
+
+:root {
+  /* Palette */
+  --navy-900: #0f1c2e;
+  --navy-800: #16263d;
+  --navy-700: #1f3350;
+  --navy-600: #2c4565;
+  --ink: #1a2433;
+  --ink-soft: #4a5668;
+  --muted: #7c8799;
+  --line: #e2e6ec;
+  --line-soft: #eef1f5;
+  --bg: #f4f6f9;
+  --panel: #ffffff;
+
+  /* Accent — warm amber/gold */
+  --gold: #d9a233;
+  --gold-dark: #b9831c;
+  --gold-soft: #f6e7c4;
+  --gold-tint: #fbf4e3;
+
+  /* Status */
+  --green: #1f9d6b;
+  --green-soft: #e3f4ec;
+  --red: #d24b4b;
+  --red-soft: #fbe8e8;
+  --red-zone: #e9606022;
+
+  /* Type scale */
+  --fs-xs: 11px;
+  --fs-sm: 13px;
+  --fs-base: 15px;
+  --fs-lg: 18px;
+  --fs-xl: 24px;
+  --fs-2xl: 32px;
+  --fs-3xl: 44px;
+
+  /* Spacing */
+  --sp-1: 4px;
+  --sp-2: 8px;
+  --sp-3: 12px;
+  --sp-4: 16px;
+  --sp-5: 24px;
+  --sp-6: 32px;
+  --sp-7: 48px;
+
+  --radius: 10px;
+  --radius-sm: 6px;
+  --shadow: 0 1px 3px rgba(15, 28, 46, 0.08), 0 6px 18px rgba(15, 28, 46, 0.06);
+  --font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  --mono: "SFMono-Regular", ui-monospace, "Segoe UI Mono", Menlo, Consolas, monospace;
+}
+
+/* Reset */
+*, *::before, *::after { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; }
+body {
+  font-family: var(--font);
+  font-size: var(--fs-base);
+  color: var(--ink);
+  background: var(--bg);
+  line-height: 1.45;
+  -webkit-font-smoothing: antialiased;
+}
+button { font-family: inherit; cursor: pointer; }
+input, select, button { font-size: inherit; }
+h1, h2, h3, h4 { margin: 0; font-weight: 650; }
+
+/* ---------- Header + tabs ---------- */
+.app-header {
+  background: linear-gradient(180deg, var(--navy-900), var(--navy-800));
+  color: #fff;
+  box-shadow: 0 2px 10px rgba(15, 28, 46, 0.18);
+}
+.app-header__inner {
+  max-width: 1180px;
+  margin: 0 auto;
+  padding: 0 var(--sp-5);
+  display: flex;
+  align-items: center;
+  gap: var(--sp-6);
+  flex-wrap: wrap;
+}
+.brand {
+  display: flex;
+  flex-direction: column;
+  padding: var(--sp-4) 0;
+}
+.brand__mark { font-size: var(--fs-xl); font-weight: 750; letter-spacing: -0.5px; }
+.brand__accent { color: var(--gold); }
+.brand__sub {
+  font-size: var(--fs-xs);
+  text-transform: uppercase;
+  letter-spacing: 1.5px;
+  color: #9fb0c6;
+  margin-top: 2px;
+}
+.tabs { display: flex; gap: 2px; align-self: stretch; }
+.tab {
+  background: transparent;
+  border: none;
+  color: #aebccf;
+  padding: 0 var(--sp-4);
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  letter-spacing: 0.3px;
+  border-bottom: 3px solid transparent;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  transition: color 0.15s, border-color 0.15s;
+}
+.tab:hover:not(:disabled) { color: #fff; }
+.tab--active { color: #fff; border-bottom-color: var(--gold); }
+.tab:disabled { opacity: 0.4; cursor: not-allowed; }
+.tab__soon {
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  background: rgba(255,255,255,0.12);
+  border-radius: 3px;
+  padding: 1px 4px;
+}
+
+/* ---------- Main + footer ---------- */
+.app-main {
+  max-width: 1180px;
+  margin: 0 auto;
+  padding: var(--sp-5);
+}
+.app-footer {
+  max-width: 1180px;
+  margin: 0 auto;
+  padding: var(--sp-5);
+  color: var(--muted);
+  font-size: var(--fs-xs);
+  text-align: center;
+}
+.tab-panel { display: none; }
+.tab-panel--active { display: block; animation: fade 0.2s ease; }
+@keyframes fade { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+
+/* ---------- Shared bits ---------- */
+.label-cap {
+  font-size: var(--fs-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+  color: var(--muted);
+  font-weight: 600;
+}
+.btn {
+  border: 1px solid var(--line);
+  background: #fff;
+  color: var(--ink);
+  border-radius: var(--radius-sm);
+  padding: 9px 14px;
+  font-weight: 600;
+  font-size: var(--fs-sm);
+  transition: background 0.15s, border-color 0.15s, transform 0.05s;
+}
+.btn:hover { background: var(--line-soft); }
+.btn:active { transform: translateY(1px); }
+.btn--primary {
+  background: var(--gold);
+  border-color: var(--gold-dark);
+  color: #2a1e05;
+}
+.btn--primary:hover { background: var(--gold-dark); color: #fff; }
+.btn--ghost { background: transparent; }
+.btn--danger { color: var(--red); border-color: var(--red); }
+.btn--danger:hover { background: var(--red-soft); }
+
+.section-title {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  margin: var(--sp-6) 0 var(--sp-3);
+}
+.section-title h2 { font-size: var(--fs-lg); }
+.empty {
+  border: 1px dashed var(--line);
+  border-radius: var(--radius);
+  padding: var(--sp-6);
+  text-align: center;
+  color: var(--muted);
+  font-size: var(--fs-sm);
+}
+
+/* ---------- Calculator two-column layout ---------- */
+.calc-grid {
+  display: grid;
+  grid-template-columns: minmax(320px, 420px) 1fr;
+  gap: var(--sp-5);
+  align-items: start;
+}
+@media (max-width: 820px) {
+  .calc-grid { grid-template-columns: 1fr; }
+  .app-header__inner { gap: var(--sp-4); }
+}
+
+.panel {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: var(--sp-5);
+}
+
+/* ---------- Toast ---------- */
+.toast {
+  position: fixed;
+  bottom: 24px;
+  left: 50%;
+  transform: translate(-50%, 16px);
+  background: var(--navy-900);
+  color: #fff;
+  padding: 10px 18px;
+  border-radius: 24px;
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  box-shadow: 0 8px 24px rgba(15, 28, 46, 0.28);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.2s, transform 0.2s;
+  z-index: 100;
+}
+.toast.is-on { opacity: 1; transform: translate(-50%, 0); }

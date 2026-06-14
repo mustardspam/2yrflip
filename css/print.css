@@ -1,0 +1,46 @@
+/* ============================================================
+   print.css — clean single-column print / print-to-PDF
+   Loaded with media="print"
+   ============================================================ */
+
+@page { margin: 18mm; }
+
+body { background: #fff !important; color: #000; font-size: 12px; }
+
+.app-header { background: #fff !important; color: #000; box-shadow: none; border-bottom: 2px solid #000; }
+.brand__mark, .brand__accent { color: #000 !important; }
+.brand__sub { color: #444 !important; }
+
+/* Hide interactive chrome */
+.tabs,
+.input-actions,
+.card__actions,
+.card__check,
+.compare-pickers,
+.compare-remove,
+.app-footer,
+.btn { display: none !important; }
+
+.app-main { max-width: 100%; padding: 0; }
+
+/* Only show the active tab, single column */
+.calc-grid { display: block !important; }
+.panel {
+  box-shadow: none !important;
+  border: 1px solid #bbb;
+  break-inside: avoid;
+  margin-bottom: 12px;
+}
+.results-panel { position: static !important; }
+
+.meter__bar { border: 1px solid #000; print-color-adjust: exact; -webkit-print-color-adjust: exact; }
+.meter__seg { print-color-adjust: exact; -webkit-print-color-adjust: exact; }
+.meter__net { font-size: 28px; }
+
+.metrics { break-inside: avoid; }
+.cards { display: block !important; }
+.card { break-inside: avoid; margin-bottom: 8px; box-shadow: none !important; }
+
+.compare-wrap { box-shadow: none !important; border: 1px solid #000; }
+.compare-table thead th { background: #000 !important; print-color-adjust: exact; -webkit-print-color-adjust: exact; }
+.compare-table .best { background: #f3e6c4 !important; print-color-adjust: exact; -webkit-print-color-adjust: exact; }
