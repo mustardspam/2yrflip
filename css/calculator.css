@@ -19,12 +19,15 @@
 .input-wrap { position: relative; display: flex; align-items: center; }
 .input-wrap .affix {
   position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
   font-size: var(--fs-sm);
   color: var(--muted);
   pointer-events: none;
+  line-height: 1;
 }
-.input-wrap .affix--pre { left: 10px; }
-.input-wrap .affix--post { right: 10px; }
+.input-wrap .affix--pre { left: 11px; }
+.input-wrap .affix--post { right: 11px; }
 
 .field input[type="text"],
 .field input[type="number"],
