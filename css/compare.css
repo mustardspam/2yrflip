@@ -51,8 +51,8 @@
   box-shadow: inset 0 0 0 1px rgba(217,162,51,0.35);
 }
 .compare-table .best::after {
-  content: "▲";
-  font-size: 8px;
+  content: "★";
+  font-size: 9px;
   margin-left: 6px;
   vertical-align: middle;
 }

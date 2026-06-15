@@ -58,20 +58,25 @@ async function pg(path: string, init: RequestInit = {}) {
     },
   });
 }
-async function getUsage(month: string): Promise<number> {
+// Atomically reserve n slots; returns { ok, count }.
+// ok=false means cap exceeded and the reserve was rolled back.
+async function tryReserve(month: string, n: number): Promise<{ ok: boolean; count: number }> {
   try {
-    const r = await pg("rpc/get_usage", { method: "POST", body: JSON.stringify({ p_month: month }) });
-    if (!r.ok) return 0;
-    return Number(await r.json()) || 0;
-  } catch { return 0; }
+    const r = await pg("rpc/try_reserve", {
+      method: "POST",
+      body: JSON.stringify({ p_month: month, p_n: n, p_cap: CAP }),
+    });
+    if (!r.ok) return { ok: false, count: 0 };
+    const res = await r.json();
+    return { ok: res.ok ?? false, count: Number(res.count) || 0 };
+  } catch { return { ok: false, count: 0 }; }
 }
-async function addUsage(month: string, n: number): Promise<number | null> {
-  if (n <= 0) return null;
+// Release over-reserved slots after actual call count is known.
+async function releaseUsage(month: string, n: number): Promise<void> {
+  if (n <= 0) return;
   try {
-    const r = await pg("rpc/add_usage", { method: "POST", body: JSON.stringify({ p_month: month, p_n: n }) });
-    if (!r.ok) return null;
-    return Number(await r.json()) || null;   // add_usage returns the new monthly total
-  } catch { return null; }
+    await pg("rpc/release_usage", { method: "POST", body: JSON.stringify({ p_month: month, p_n: n }) });
+  } catch { /* ignore */ }
 }
 async function cacheGet(addr: string, month: string): Promise<any | null> {
   try {
@@ -209,12 +214,14 @@ Deno.serve(async (req) => {
   const cached = await cacheGet(addrKey, month);
   if (cached) { cached.cached = true; return new Response(JSON.stringify(cached), { headers }); }
 
-  // 3) hard monthly cap — reserve up to 3 calls per lookup
-  const used = await getUsage(month);
-  if (used + 3 > CAP) {
+  // 3) hard monthly cap — atomically reserve up to 3 slots before touching RentCast.
+  // tryReserve increments then rolls back if the new total exceeds CAP, so two
+  // concurrent requests can't both pass a cap that's about to be hit.
+  const { ok: capOk, count: reservedAt } = await tryReserve(month, 3);
+  if (!capOk) {
     return new Response(JSON.stringify({
       error: `Monthly lookup limit reached (${CAP} RentCast calls). Resets on the 1st. Edit fields manually to keep going.`,
-      usage: { used, cap: CAP },
+      usage: { used: reservedAt, cap: CAP },
     }), { status: 429, headers });
   }
 
@@ -224,7 +231,8 @@ Deno.serve(async (req) => {
   const billed = () => dbg.filter((s) => /^\/(listings|properties|avm)/.test(s) && /:\d+$/.test(s)).length;
 
   if (!listing) {
-    await addUsage(month, billed());
+    const n = billed();
+    await releaseUsage(month, 3 - n);
     return new Response(JSON.stringify({ error: "No property data found for that address. Try the manual-entry path.", address, debug: { calls: dbg } }), { status: 404, headers });
   }
 
@@ -235,7 +243,8 @@ Deno.serve(async (req) => {
   ]);
 
   const n = billed();
-  const newUsed = (await addUsage(month, n)) ?? (used + n);
+  await releaseUsage(month, 3 - n);              // return any unused slots
+  const newUsed = reservedAt - Math.max(0, 3 - n);
 
   const payload = {
     source: "rentcast+fema", address, zip: zipFromAddress(address),

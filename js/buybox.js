@@ -32,10 +32,19 @@
     filingStatus: DEF.filingStatus || "mfj",
     sellClosingPct: DEF.closingCostPct || 0.07,
     acqClosingPct: 0.015,
+    carryPct: 0.03,      // annual carrying cost: property tax + insurance + utilities
     demoCost: 0,
     targetMode: "pct",   // "pct" of ARV or "usd" fixed
     targetValue: 15      // 15% (pct mode) or dollars (usd mode)
   };
+
+  var ELIG_CHECKS = [
+    "Owned this property for 2+ years",
+    "Used as primary residence for 2+ of the last 5 years",
+    "Haven't claimed §121 in the past 2 years",
+    "No non-qualified use (e.g., rental period before move-in)"
+  ];
+  var eligChecked = [false, false, false, false];
 
   var listing = {            // editable listing facts (from API/mock or manual)
     url: "", address: "", askingPrice: 0, compPsf: 0,
@@ -61,12 +70,20 @@
       ? U.parseNum(a.targetValue)
       : arv * (U.parseNum(a.targetValue) / 100);
 
-    // MAO solves: price + acq% * price = arv - build - demo - sellClose - profit
-    var numerator = arv - buildCost - U.parseNum(a.demoCost) - sellClosing - targetProfit;
-    var mao = numerator / (1 + U.parseNum(a.acqClosingPct));
+    var years = U.parseNum(a.holdMonths) / 12;
+    var carryRate = U.parseNum(a.carryPct) * years;   // total carry fraction over the hold
+    var acqRate = U.parseNum(a.acqClosingPct);
+
+    // MAO closed-form. Costs that scale with the purchase price P (acquisition
+    // closing + land carry) go in the denominator; price-independent costs
+    // (build carry, etc.) in the numerator:
+    //   ARV = P + build + demo + sellClose + profit + acqRate*P + carryRate*(P + build)
+    var numerator = arv - buildCost - U.parseNum(a.demoCost) - sellClosing - targetProfit - carryRate * buildCost;
+    var mao = numerator / (1 + acqRate + carryRate);
     var asking = U.parseNum(L.askingPrice);
     var gap = mao - asking;
-    var acqClosing = asking * U.parseNum(a.acqClosingPct);
+    var acqClosing = acqRate * mao;                   // derived from MAO so the breakdown foots
+    var carryCost = carryRate * (buildCost + mao);    // total carrying cost over the hold
 
     // §121 reuse — buy at asking, build, sell
     var d121 = window.Calculator.compute({
@@ -102,7 +119,7 @@
 
     return {
       compPsf: compPsf, arv: arv, buildCost: buildCost, sellClosing: sellClosing,
-      targetProfit: targetProfit, mao: mao, asking: asking, gap: gap,
+      targetProfit: targetProfit, carryCost: carryCost, mao: mao, asking: asking, gap: gap,
       acqClosing: acqClosing, d121: d121, parts: parts, score: score, verdict: verdict
     };
   }
@@ -263,6 +280,7 @@
     assumptions.filingStatus = els.filingStatus.value;
     assumptions.sellClosingPct = U.parseNum(els.sellClosingPct.value) / 100;
     assumptions.acqClosingPct = U.parseNum(els.acqClosingPct.value) / 100;
+    assumptions.carryPct = U.parseNum(els.carryPct.value) / 100;
     assumptions.demoCost = U.parseNum(els.demoCost.value);
     assumptions.targetMode = els.targetMode.value;
     assumptions.targetValue = U.parseNum(els.targetValue.value);
@@ -353,6 +371,10 @@
     var d = computeDeal();
     resultHost.innerHTML = "";
 
+    var over121 = d.d121.overLimit;
+    var gainExists = d.d121.grossEquity > 0;
+    var allEligChecked = !gainExists || eligChecked.every(Boolean);
+
     var vlabel = d.verdict === "go" ? "Pursue" : (d.verdict === "caution" ? "Maybe" : "Pass");
     var head = U.el("div", { class: "bb-verdict bb-verdict--" + d.verdict }, [
       dial(d.score, d.verdict),
@@ -385,24 +407,46 @@
       row("ARV at sale (" + U.fmtUSD(d.compPsf) + "/sqft × " + U.fmtSqft(assumptions.plannedSqft) + ")", U.fmtUSD(d.arv), { strong: true }),
       row("− Build cost", "-" + U.fmtUSD(d.buildCost)),
       assumptions.demoCost > 0 ? row("− Demolition", "-" + U.fmtUSD(assumptions.demoCost)) : null,
+      d.carryCost > 0 ? row("− Carry cost (taxes + ins.)", "-" + U.fmtUSD(d.carryCost)) : null,
       row("− Sell-side closing", "-" + U.fmtUSD(d.sellClosing)),
       row("− Target profit", "-" + U.fmtUSD(d.targetProfit)),
       row("− Acquisition closing", "-" + U.fmtUSD(d.acqClosing)),
       row("= Max allowable offer", U.fmtUSD(d.mao), { strong: true })
     ]);
 
+    // §121 eligibility checklist (advisory — only when there's gain to exclude)
+    var checklistEl = null;
+    if (gainExists) {
+      checklistEl = U.el("div", { class: "bb-elig-checklist" });
+      checklistEl.appendChild(U.el("div", { class: "bb-elig-head", text: "§121 eligibility checklist" }));
+      ELIG_CHECKS.forEach(function (label, i) {
+        var cb = U.el("input", { type: "checkbox", id: "elig_" + i });
+        cb.checked = eligChecked[i];
+        cb.addEventListener("change", function () { eligChecked[i] = cb.checked; recalc(); });
+        var item = U.el("label", { for: "elig_" + i, class: "bb-elig-item" }, [cb, document.createTextNode(" " + label)]);
+        checklistEl.appendChild(item);
+      });
+      if (!allEligChecked) {
+        checklistEl.appendChild(U.el("p", { class: "bb-elig-note",
+          text: "Complete the checklist to confirm §121 applies to your situation." }));
+      }
+    }
+
     // §121 + flood chips
-    var over121 = d.d121.overLimit;
+    var s121Tone = over121 ? "bad" : (!gainExists ? "warn" : (allEligChecked ? "ok" : "warn"));
     var chips = U.el("div", { class: "bb-chips" }, [
       U.el("div", { class: "bb-chip bb-chip--" + floodTone(listing.floodZone) }, [
         U.el("span", { class: "label-cap", text: "FEMA flood" }),
         U.el("strong", { text: "Zone " + listing.floodZone })
       ]),
-      U.el("div", { class: "bb-chip bb-chip--" + (over121 ? "bad" : (d.d121.grossEquity <= 0 ? "warn" : "ok")) }, [
+      U.el("div", { class: "bb-chip bb-chip--" + s121Tone }, [
         U.el("span", { class: "label-cap", text: "§121" }),
-        U.el("strong", { text: d.d121.grossEquity <= 0
+        U.el("strong", { text: !gainExists
           ? "No gain yet"
-          : (over121 ? "Over by " + U.fmtUSDshort(-d.d121.headroom) : U.fmtUSDshort(d.d121.headroom) + " left") })
+          : (over121 ? "Over by " + U.fmtUSDshort(-d.d121.headroom) : U.fmtUSDshort(d.d121.headroom) + " left") }),
+        (!allEligChecked && gainExists)
+          ? U.el("span", { class: "bb-elig-cav", text: "⚠ Verify eligibility" })
+          : null
       ]),
       U.el("div", { class: "bb-chip" }, [
         U.el("span", { class: "label-cap", text: "Comps" }),
@@ -423,6 +467,7 @@
     resultHost.appendChild(head);
     resultHost.appendChild(mao);
     resultHost.appendChild(chips);
+    if (checklistEl) resultHost.appendChild(checklistEl);
     resultHost.appendChild(rows);
     if (tax) resultHost.appendChild(tax);
     resultHost.appendChild(actions);
@@ -536,6 +581,7 @@
     els.filingStatus.value = assumptions.filingStatus;
     els.sellClosingPct.value = pctInput(assumptions.sellClosingPct);
     els.acqClosingPct.value = pctInput(assumptions.acqClosingPct);
+    els.carryPct.value = pctInput(assumptions.carryPct);
     els.demoCost.value = assumptions.demoCost;
     els.targetMode.value = assumptions.targetMode;
     els.targetValue.value = assumptions.targetValue;
@@ -567,6 +613,7 @@
       field("filingStatus", "Filing status", { type: "select", options: [["mfj", "Married — joint"], ["single", "Single"]] }),
       field("sellClosingPct", "Sell-side closing", { pct: true }),
       field("acqClosingPct", "Acquisition closing", { pct: true }),
+      field("carryPct", "Annual carry cost", { pct: true }),
       field("demoCost", "Demolition cost", { money: true }),
       field("targetMode", "Target profit basis", { type: "select", options: [["pct", "% of ARV"], ["usd", "$ fixed"]] }),
       field("targetValue", "Target profit", { note: "% of ARV" })

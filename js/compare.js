@@ -11,14 +11,16 @@
   var panelHost = null;
 
   // metric rows: pull from compute(); highlight = highest value wins
+  // goal: "max" = higher is better, "min" = lower is better.
+  // The favorable extreme per row is highlighted (not just the highest).
   var ROWS = [
-    { key: "basis", label: "All-in basis", fmt: U.fmtUSD, highlight: true },
-    { key: "arv", label: "ARV at listing", fmt: U.fmtUSD, highlight: true },
-    { key: "grossEquity", label: "Gross equity", fmt: U.fmtUSD, highlight: true },
-    { key: "closingCosts", label: "Closing costs", fmt: U.fmtUSD, highlight: true },
-    { key: "netProceeds", label: "Net proceeds", fmt: U.fmtUSD, highlight: true },
-    { key: "headroom", label: "§121 headroom", fmt: U.fmtUSD, highlight: true },
-    { key: "effectiveNet", label: "Est. net in pocket", fmt: U.fmtUSD, highlight: true }
+    { key: "basis", label: "All-in basis", fmt: U.fmtUSD, highlight: true, goal: "min" },
+    { key: "arv", label: "ARV at listing", fmt: U.fmtUSD, highlight: true, goal: "max" },
+    { key: "grossEquity", label: "Gross equity", fmt: U.fmtUSD, highlight: true, goal: "max" },
+    { key: "closingCosts", label: "Closing costs", fmt: U.fmtUSD, highlight: true, goal: "min" },
+    { key: "netProceeds", label: "Net proceeds", fmt: U.fmtUSD, highlight: true, goal: "max" },
+    { key: "headroom", label: "§121 headroom", fmt: U.fmtUSD, highlight: true, goal: "max" },
+    { key: "effectiveNet", label: "Est. net in pocket", fmt: U.fmtUSD, highlight: true, goal: "max" }
   ];
 
   function syncSelection(list) {
@@ -77,7 +79,10 @@
     // body rows
     var bodyRows = ROWS.map(function (rdef) {
       var vals = computed.map(function (c) { return c.d[rdef.key]; });
-      var best = rdef.highlight ? Math.max.apply(null, vals) : null;
+      var finite = vals.filter(isFinite);
+      var best = (rdef.highlight && finite.length)
+        ? (rdef.goal === "min" ? Math.min.apply(null, finite) : Math.max.apply(null, finite))
+        : null;
       var cells = [U.el("td", { text: rdef.label })];
       vals.forEach(function (v) {
         var isBest = rdef.highlight && computed.length > 1 && v === best && isFinite(v);
@@ -119,7 +124,7 @@
     syncSelection(list);
 
     panelHost.appendChild(U.el("p", { class: "compare-intro",
-      text: "Pick up to " + MAX + " scenarios. Highest value in each row is highlighted." }));
+      text: "Pick up to " + MAX + " scenarios. Best value in each row is highlighted (★)." }));
     panelHost.appendChild(pickers(list));
 
     var chosen = selected

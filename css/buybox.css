@@ -110,6 +110,50 @@
 .bb-row--strong:last-child { background: linear-gradient(180deg, #fdf6e6, var(--gold-tint)); }
 .bb-row--strong:last-child .bb-row__v { color: var(--gold-dark); font-weight: 800; }
 
+/* ---- §121 eligibility checklist ---- */
+.bb-elig-cav {
+  display: block;
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--gold-dark);
+  margin-top: 2px;
+  letter-spacing: 0.2px;
+}
+.bb-elig-checklist {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: #fff;
+  padding: var(--sp-3) var(--sp-4);
+  margin-bottom: var(--sp-4);
+  box-shadow: var(--shadow-sm);
+}
+.bb-elig-head {
+  font-size: var(--fs-xs);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--muted);
+  margin-bottom: var(--sp-2);
+}
+.bb-elig-item {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-2);
+  font-size: var(--fs-sm);
+  color: var(--ink-soft);
+  padding: 4px 0;
+  cursor: pointer;
+  line-height: 1.4;
+}
+.bb-elig-item input[type="checkbox"] { margin-top: 2px; flex: none; accent-color: var(--gold-dark); }
+.bb-elig-note {
+  font-size: var(--fs-xs);
+  color: var(--gold-dark);
+  margin: var(--sp-2) 0 0;
+  padding-top: var(--sp-2);
+  border-top: 1px solid var(--gold-tint);
+}
+
 @media (max-width: 560px) {
   .bb-chips { grid-template-columns: 1fr; }
 }

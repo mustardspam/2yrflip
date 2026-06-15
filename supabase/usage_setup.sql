@@ -43,6 +43,42 @@ begin
 end;
 $$;
 
+-- Atomically reserve N slots; rolls back if the new total would exceed p_cap.
+-- Returns { ok: true, count: <new total> } on success,
+--         { ok: false, count: <pre-attempt total> } if cap exceeded.
+-- Eliminates the read-then-write race: two concurrent requests can no longer
+-- both pass the pre-check and both bill against a cap that was about to be hit.
+create or replace function public.try_reserve(p_month text, p_n int, p_cap int)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare v_new int;
+begin
+  insert into public.api_usage(month, count) values (p_month, p_n)
+  on conflict (month) do update set count = public.api_usage.count + p_n
+  returning count into v_new;
+
+  if v_new > p_cap then
+    update public.api_usage set count = greatest(0, count - p_n) where month = p_month;
+    return jsonb_build_object('ok', false, 'count', v_new - p_n);
+  end if;
+
+  return jsonb_build_object('ok', true, 'count', v_new);
+end;
+$$;
+
+-- Release N over-reserved slots (call after the actual call count is known).
+create or replace function public.release_usage(p_month text, p_n int)
+returns void
+language sql
+security definer
+set search_path = public
+as $$
+  update public.api_usage set count = greatest(0, count - p_n) where month = p_month;
+$$;
+
 -- Lock the tables: no anon/public access. The Edge Function uses the
 -- service-role key, which bypasses RLS. With RLS on and NO policies,
 -- nobody else can read or write these tables.
