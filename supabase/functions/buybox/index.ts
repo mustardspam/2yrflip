@@ -83,7 +83,10 @@ async function cacheGet(addr: string, month: string): Promise<any | null> {
     const r = await pg(`buybox_cache?address=eq.${encodeURIComponent(addr)}&month=eq.${month}&select=payload`);
     if (!r.ok) return null;
     const rows = await r.json();
-    return rows[0]?.payload ?? null;
+    const payload = rows[0]?.payload ?? null;
+    // Invalidate stale cache entries that predate the compDetails field.
+    if (payload && !Array.isArray(payload.comps?.compDetails)) return null;
+    return payload;
   } catch { return null; }
 }
 async function cachePut(addr: string, month: string, payload: any) {
