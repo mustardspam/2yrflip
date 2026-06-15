@@ -291,6 +291,7 @@
 @media (prefers-reduced-motion: reduce) { .card { animation: none; } }
 .card__top { display: flex; justify-content: space-between; align-items: flex-start; gap: var(--sp-2); }
 .card__zip { font-size: var(--fs-lg); font-weight: 750; }
+.card__zip.is-neg { color: var(--red); }
 .card__label { font-size: var(--fs-xs); color: var(--muted); }
 .card__flag { font-size: var(--fs-xs); font-weight: 700; padding: 3px 9px; border-radius: 12px; white-space: nowrap; border: 1px solid transparent; }
 .card__flag--ok { background: var(--green-soft); color: var(--green); border-color: #bfe6d3; }

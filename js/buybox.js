@@ -24,6 +24,15 @@
   ];
 
   var DEF = window.Calculator ? window.Calculator.DEFAULTS : {};
+  var EXCLUSION = (window.Calculator && window.Calculator.EXCLUSION) || { single: 250000, mfj: 500000 };
+
+  // tunable scoring constants
+  var ROI_TARGET = 0.20;          // annualized after-tax ROI for full marks
+  var GO_ROI_MIN = 0.12;          // min annualized ROI to allow a GO verdict
+  var LOT_FLOOR = 0.12;           // lot-to-ARV at/below = full "lot room" marks
+  var LOT_CEIL = 0.30;            // lot-to-ARV at/above = zero "lot room"
+  var DEFAULT_DISPERSION = 0.25;  // comp spread assumed when the API range is missing
+
   var ASSUMPTION_DEFAULTS = {
     plannedSqft: DEF.sqft || 3000,
     costPerSqft: DEF.costPerSqft || 165,
@@ -32,15 +41,14 @@
     filingStatus: DEF.filingStatus || "mfj",
     sellClosingPct: DEF.closingCostPct || 0.07,
     acqClosingPct: 0.015,
-    carryPct: 0.03,      // annual carrying cost: property tax + insurance + utilities
+    carryPct: 0.03,      // annual carry: property tax + insurance + utilities (non-deductible, NOT in tax basis)
     demoCost: 0,
-    targetMode: "pct",   // "pct" of ARV or "usd" fixed
-    targetValue: 15      // 15% (pct mode) or dollars (usd mode)
+    ltcgRate: 0.15       // assumed LT cap-gains rate on gain above the §121 cap
   };
 
   var ELIG_CHECKS = [
-    "Owned this property for 2+ years",
-    "Used as primary residence for 2+ of the last 5 years",
+    "Will own the property 2+ years before selling",
+    "Will occupy as primary residence 24+ months (use-test clock starts at move-in, not lot purchase)",
     "Haven't claimed §121 in the past 2 years",
     "No non-qualified use (e.g., rental period before move-in)"
   ];
@@ -59,81 +67,127 @@
   function pctInput(dec) { return Math.round(U.parseNum(dec) * 100 * 1e4) / 1e4; }
 
   // ---- compute -------------------------------------------------------
+  // Forward equity-capture projection for a RAW-LAND build:
+  // buy lot (asking = cost) -> build -> hold ~2yr -> sell. Reports the real
+  // equity captured and how much of it §121 shelters tax-free.
+  // Economic track (carry INCLUDED) and tax track (carry EXCLUDED) are kept
+  // separate — tax gain is structurally larger than real profit by the carry.
   function computeDeal() {
     var a = assumptions, L = listing;
+    var lot = U.parseNum(L.askingPrice);          // lot price from URL = acquisition cost
     var compPsf = U.parseNum(L.compPsf);
-    var factor = Math.pow(1 + U.parseNum(a.appreciationRate), U.parseNum(a.holdMonths) / 12);
-    var arv = U.parseNum(a.plannedSqft) * compPsf * factor;
-    var buildCost = U.parseNum(a.plannedSqft) * U.parseNum(a.costPerSqft);
-    var sellClosing = arv * U.parseNum(a.sellClosingPct);
-    var targetProfit = a.targetMode === "usd"
-      ? U.parseNum(a.targetValue)
-      : arv * (U.parseNum(a.targetValue) / 100);
+    var sqft = U.parseNum(a.plannedSqft);
+    var holdYears = U.parseNum(a.holdMonths) / 12; // single source of truth for appr + carry
 
-    var years = U.parseNum(a.holdMonths) / 12;
-    var carryRate = U.parseNum(a.carryPct) * years;   // total carry fraction over the hold
-    var acqRate = U.parseNum(a.acqClosingPct);
+    // --- cost stack (capitalized basis) ---
+    var construction = sqft * U.parseNum(a.costPerSqft);
+    var acqClosing = lot * U.parseNum(a.acqClosingPct);     // on the LOT, not ARV
+    var demo = U.parseNum(a.demoCost);
+    var allInBasis = lot + acqClosing + construction + demo; // = adjusted tax basis
 
-    // MAO closed-form. Costs that scale with the purchase price P (acquisition
-    // closing + land carry) go in the denominator; price-independent costs
-    // (build carry, etc.) in the numerator:
-    //   ARV = P + build + demo + sellClose + profit + acqRate*P + carryRate*(P + build)
-    var numerator = arv - buildCost - U.parseNum(a.demoCost) - sellClosing - targetProfit - carryRate * buildCost;
-    var mao = numerator / (1 + acqRate + carryRate);
-    var asking = U.parseNum(L.askingPrice);
-    var gap = mao - asking;
-    var acqClosing = acqRate * mao;                   // derived from MAO so the breakdown foots
-    var carryCost = carryRate * (buildCost + mao);    // total carrying cost over the hold
+    // --- value + sale ---
+    var factor = Math.pow(1 + U.parseNum(a.appreciationRate), holdYears);
+    var arv = sqft * compPsf * factor;             // appreciation hits finished value once
+    var sellClosing = arv * U.parseNum(a.sellClosingPct);   // on ARV (sale price)
+    var netSaleProceeds = arv - sellClosing;       // = amount realized
 
-    // §121 reuse — buy at asking, build, sell
-    var d121 = window.Calculator.compute({
-      lotCost: asking, sqft: a.plannedSqft, costPerSqft: a.costPerSqft,
-      arvPerSqft: compPsf, appreciationRate: a.appreciationRate,
-      holdMonths: a.holdMonths, filingStatus: a.filingStatus, closingCostPct: a.sellClosingPct
-    });
+    // --- carry (economic only — NOT in tax basis, NOT deductible) ---
+    var carry = allInBasis * U.parseNum(a.carryPct) * holdYears;
 
-    // ----- scoring -----
+    // --- economic track ---
+    var economicEquityPreTax = arv - allInBasis - carry - sellClosing;
+    var cashInvested = allInBasis + carry;         // ROI denominator (unleveraged)
+
+    // --- tax track (§121) ---
+    var limit = EXCLUSION[a.filingStatus] || EXCLUSION.mfj;
+    var ltcg = U.parseNum(a.ltcgRate);
+    var taxGain = netSaleProceeds - allInBasis;    // carry excluded; selling exp netted once
+    var excludedGain = Math.min(Math.max(0, taxGain), limit);
+    var taxableExcess = Math.max(0, taxGain - limit);
+    var taxOnExcess = taxableExcess * ltcg;
+    var headroom = limit - Math.max(0, taxGain);   // §121 cap room left
+    var overLimit = taxGain > limit;
+    // worst case if the use/occupancy test fails: the ENTIRE gain is taxable
+    var taxIfNoExclusion = Math.max(0, taxGain) * ltcg;
+
+    var economicEquityAfterTax = economicEquityPreTax - taxOnExcess;
+
+    // --- returns ---
+    var roi = cashInvested > 0 ? economicEquityAfterTax / cashInvested : null;
+    var annualizedRoi = (roi != null && (1 + roi) > 0 && holdYears > 0)
+      ? Math.pow(1 + roi, 1 / holdYears) - 1 : null;
+
+    // --- confidence / risk inputs (never enter the dollar waterfall) ---
+    var compCount = U.parseNum(L.compCount);
+    var lowPsf = U.parseNum(L.lowPsf), highPsf = U.parseNum(L.highPsf);
+    // FIX: missing range (high<=low, incl. 0,0) must score conservatively, not as perfect tightness
+    var dispersion = compPsf <= 0 ? 1 : (highPsf <= lowPsf ? DEFAULT_DISPERSION : (highPsf - lowPsf) / compPsf);
+    var lotToArv = arv > 0 ? lot / arv : 1;
+    var noComps = compCount <= 0 || compPsf <= 0;
+
+    // downside ARV at the low comp $/sqft
+    var arvLow = sqft * lowPsf * factor;
+    var equityLow = arvLow - allInBasis - carry - (arvLow * U.parseNum(a.sellClosingPct));
+
+    // "what can I afford to build" — breakeven build budget for this lot+comp
+    var maxBuildBudget = arv > 0
+      ? arv * (1 - U.parseNum(a.sellClosingPct)) / (1 + U.parseNum(a.carryPct) * holdYears) - (lot + acqClosing)
+      : 0;
+    var maxSqft = U.parseNum(a.costPerSqft) > 0 ? maxBuildBudget / U.parseNum(a.costPerSqft) : 0;
+
+    // ----- scoring (100) -----
     var parts = {};
-    // margin (50)
-    parts.margin = (mao > 0 && gap > 0) ? Math.min(50, 50 * (gap / mao) / 0.15) : 0;
-    // ARV confidence (15)
-    var count = U.parseNum(L.compCount);
-    if (count <= 0 || compPsf <= 0) {
-      parts.arv = 0;
-    } else {
-      var countScore = U.clamp(count / 5, 0, 1);
-      var disp = (L.highPsf && L.lowPsf && compPsf)
-        ? (U.parseNum(L.highPsf) - U.parseNum(L.lowPsf)) / compPsf : 0.25;
-      var tight = U.clamp(1 - disp / 0.4, 0, 1);
-      parts.arv = 15 * (0.6 * countScore + 0.4 * tight);
-    }
-    // §121 fit (15)
-    if (d121.grossEquity <= 0) parts.s121 = 0;
-    else if (d121.grossEquity <= d121.limit) parts.s121 = 15;
-    else parts.s121 = 15 * U.clamp(d121.limit / d121.grossEquity, 0, 1);
-    // flood (20)
+    parts.equity = economicEquityAfterTax <= 0 ? 0 : U.clamp(economicEquityAfterTax / limit, 0, 1) * 45;
+    parts.roi = (annualizedRoi == null || annualizedRoi <= 0) ? 0 : U.clamp(annualizedRoi / ROI_TARGET, 0, 1) * 15;
+    parts.arvConf = noComps ? 0 : (U.clamp(compCount / 8, 0, 1) * 8 + U.clamp(1 - dispersion / 0.5, 0, 1) * 7);
+    parts.lotRoom = economicEquityAfterTax <= 0 ? 0
+      : U.clamp(1 - (lotToArv - LOT_FLOOR) / (LOT_CEIL - LOT_FLOOR), 0, 1) * 10;
+    parts.s121 = taxGain <= 0 ? 0 : (taxGain <= limit ? 8 : U.clamp(limit / taxGain, 0, 1) * 8);
     parts.flood = floodScore(L.floodZone);
 
-    var score = Math.round(parts.margin + parts.arv + parts.s121 + parts.flood);
-    var verdict = (score >= 75 && gap > 0) ? "go" : (score >= 50 ? "caution" : "pass");
+    var score = Math.round(parts.equity + parts.roi + parts.arvConf + parts.lotRoom + parts.s121 + parts.flood);
+
+    // ----- verdict (gated) -----
+    var verdict;
+    if (economicEquityAfterTax <= 0) {
+      verdict = "pass";                              // hard veto: a money-loser is a money-loser
+    } else if (noComps) {
+      verdict = (score >= 50) ? "caution" : "pass";  // comp-data gate: phantom ARV never gets GO
+    } else if (score >= 75 && annualizedRoi != null && annualizedRoi >= GO_ROI_MIN
+               && floodScore(L.floodZone) > 0 && taxGain <= limit) {
+      verdict = "go";
+    } else if (score >= 50) {
+      verdict = "caution";
+    } else {
+      verdict = "pass";
+    }
 
     return {
-      compPsf: compPsf, arv: arv, buildCost: buildCost, sellClosing: sellClosing,
-      targetProfit: targetProfit, carryCost: carryCost, mao: mao, asking: asking, gap: gap,
-      acqClosing: acqClosing, d121: d121, parts: parts, score: score, verdict: verdict
+      lot: lot, compPsf: compPsf, sqft: sqft, holdYears: holdYears,
+      construction: construction, acqClosing: acqClosing, demo: demo, allInBasis: allInBasis,
+      arv: arv, sellClosing: sellClosing, netSaleProceeds: netSaleProceeds, carry: carry,
+      economicEquityPreTax: economicEquityPreTax, economicEquityAfterTax: economicEquityAfterTax,
+      cashInvested: cashInvested, taxGain: taxGain, limit: limit, excludedGain: excludedGain,
+      taxableExcess: taxableExcess, taxOnExcess: taxOnExcess, taxIfNoExclusion: taxIfNoExclusion,
+      headroom: headroom, overLimit: overLimit, roi: roi, annualizedRoi: annualizedRoi,
+      dispersion: dispersion, lotToArv: lotToArv, noComps: noComps,
+      arvLow: arvLow, equityLow: equityLow, maxBuildBudget: maxBuildBudget, maxSqft: maxSqft,
+      parts: parts, score: score, verdict: verdict
     };
   }
 
+  // flood / site risk (0–7)
   function floodScore(zone) {
     var z = String(zone || "").toUpperCase();
-    if (z === "X" || z === "X500") return 20;
-    if (z[0] === "V") return 0;
-    if (z[0] === "A") return 8;
-    return 10; // D / UNKNOWN — neutral
+    if (!z || z === "UNKNOWN" || z === "D") return 4;     // unknown scores conservatively (mid), never best-case
+    if (z === "X" || z === "X500") return 7;
+    if (z[0] === "V") return 0;                            // coastal high-risk
+    if (z[0] === "A") return 2;                            // SFHA high-risk
+    return 4;
   }
   function floodTone(zone) {
     var s = floodScore(zone);
-    return s >= 20 ? "ok" : (s <= 8 ? "bad" : "warn");
+    return s >= 7 ? "ok" : (s <= 2 ? "bad" : "warn");
   }
 
   // ---- data fetch / mock --------------------------------------------
@@ -146,7 +200,7 @@
   function mockData(input) {
     var seed = strHash(input.url || input.address || "sample");
     var psf = 200 + (seed % 130);            // 200–329
-    var asking = 300000 + (seed % 9) * 35000; // 300k–580k
+    var asking = 80000 + (seed % 12) * 18000; // 80k–278k (raw-land lot price)
     var count = 4 + (seed % 5);              // 4–8
     var spread = 0.10 + ((seed >> 3) % 20) / 100; // 10–29%
     var zones = ["X", "X", "X500", "AE", "A", "X"];
@@ -285,11 +339,10 @@
     assumptions.acqClosingPct = U.parseNum(els.acqClosingPct.value) / 100;
     assumptions.carryPct = U.parseNum(els.carryPct.value) / 100;
     assumptions.demoCost = U.parseNum(els.demoCost.value);
-    assumptions.targetMode = els.targetMode.value;
-    assumptions.targetValue = U.parseNum(els.targetValue.value);
+    assumptions.ltcgRate = U.parseNum(els.ltcgRate.value) / 100;
   }
 
-  function recalc() { readInputs(); renderResult(); updateTargetSuffix(); }
+  function recalc() { readInputs(); renderResult(); }
 
   function reset() {
     listing.url = ""; listing.address = ""; listing.askingPrice = 0;
@@ -305,10 +358,6 @@
     recalc();
   }
 
-  function updateTargetSuffix() {
-    var n = document.getElementById("bb_target_suffix");
-    if (n) n.textContent = assumptions.targetMode === "usd" ? "$ (fixed)" : "% of ARV";
-  }
 
   // ---- field builders ------------------------------------------------
   function field(key, label, opts) {
@@ -359,25 +408,35 @@
     return wrap;
   }
 
-  function metaMeter(d) {
-    // Clamp MAO at 0 so a negative MAO (deal can't pencil) renders as all-red,
-    // not a negative-width segment relying on browser clamping.
-    var maoPos = Math.max(0, d.mao);
-    var total = Math.max(maoPos, d.asking, 1);
-    var navy = Math.max(0, Math.min(d.asking, maoPos));
-    var room = Math.max(0, maoPos - d.asking);
-    var over = Math.max(0, d.asking - maoPos);
-    var segs = [
-      U.el("div", { class: "meter__seg meter__seg--basis", style: "width:" + (navy / total * 100) + "%", title: "Within MAO" }),
-      U.el("div", { class: "meter__seg meter__seg--gain", style: "width:" + (room / total * 100) + "%", title: "Buy room" }),
-      U.el("div", { class: "meter__seg meter__seg--over", style: "width:" + (over / total * 100) + "%", title: "Over MAO" })
-    ];
+  // Value-vs-cost meter. Profitable: [costs navy][equity green]. Losing:
+  // [covered-by-sale navy][shortfall red]. All widths clamped to [0,100].
+  function valueMeter(d) {
+    var cost = d.allInBasis + d.carry + d.sellClosing; // total project cost
+    var total = Math.max(d.arv, cost, 1);
+    var profitable = d.economicEquityPreTax > 0;
+    var segs;
+    if (profitable) {
+      var costW = U.clamp(cost / total * 100, 0, 100);
+      var eqW = U.clamp(d.economicEquityPreTax / total * 100, 0, 100);
+      segs = [
+        U.el("div", { class: "meter__seg meter__seg--basis", style: "width:" + costW + "%", title: "All-in cost " + U.fmtUSD(cost) }),
+        U.el("div", { class: "meter__seg meter__seg--gain", style: "width:" + eqW + "%", title: "Equity " + U.fmtUSD(d.economicEquityPreTax) })
+      ];
+    } else {
+      var coveredW = U.clamp(d.arv / total * 100, 0, 100);
+      var shortW = U.clamp((cost - d.arv) / total * 100, 0, 100);
+      segs = [
+        U.el("div", { class: "meter__seg meter__seg--basis", style: "width:" + coveredW + "%", title: "Sale covers " + U.fmtUSD(d.arv) }),
+        U.el("div", { class: "meter__seg meter__seg--over", style: "width:" + shortW + "%", title: "Short by " + U.fmtUSD(cost - d.arv) })
+      ];
+    }
     return U.el("div", { class: "meter__bar" }, segs);
   }
 
   function row(label, value, opts) {
     opts = opts || {};
-    return U.el("div", { class: "bb-row" + (opts.strong ? " bb-row--strong" : "") }, [
+    var cls = "bb-row" + (opts.strong ? " bb-row--strong" : "") + (opts.sub ? " bb-row--sub" : "");
+    return U.el("div", { class: cls }, [
       U.el("span", { class: "bb-row__k", text: label }),
       U.el("span", { class: "bb-row__v" + (opts.neg ? " is-neg" : ""), text: value })
     ]);
@@ -388,47 +447,58 @@
     var d = computeDeal();
     resultHost.innerHTML = "";
 
-    var over121 = d.d121.overLimit;
-    var gainExists = d.d121.grossEquity > 0;
+    var gainExists = d.taxGain > 0;
     var allEligChecked = !gainExists || eligChecked.every(Boolean);
+    var profitable = d.economicEquityAfterTax > 0;
 
     var vlabel = d.verdict === "go" ? "Pursue" : (d.verdict === "caution" ? "Maybe" : "Pass");
+    var roiTxt = d.annualizedRoi != null ? U.fmtPct(d.annualizedRoi) + "/yr" : "—";
+    var subTxt = profitable
+      ? "Captures " + U.fmtUSD(d.economicEquityAfterTax) + " after-tax equity · " + roiTxt
+      : "Loses " + U.fmtUSD(-d.economicEquityAfterTax) + " — doesn't pencil";
     var head = U.el("div", { class: "bb-verdict bb-verdict--" + d.verdict }, [
       dial(d.score, d.verdict),
       U.el("div", { class: "bb-verdict__txt" }, [
         U.el("div", { class: "bb-verdict__badge", text: vlabel }),
-        U.el("div", { class: "bb-verdict__sub", text: d.gap >= 0
-          ? "Room of " + U.fmtUSD(d.gap) + " under your max offer"
-          : U.fmtUSD(-d.gap) + " over your max offer" })
+        U.el("div", { class: "bb-verdict__sub", text: subTxt })
       ])
     ]);
 
-    // MAO vs asking
-    var mao = U.el("div", { class: "bb-mao" }, [
+    // headline: after-tax equity captured + lot price
+    var equityBlock = U.el("div", { class: "bb-mao" }, [
       U.el("div", { class: "bb-mao__heads" }, [
-        U.el("div", {}, [U.el("div", { class: "label-cap", text: "Max allowable offer" }),
-          U.el("div", { class: "bb-mao__big", text: U.fmtUSD(d.mao) })]),
-        U.el("div", { class: "bb-mao__ask" }, [U.el("div", { class: "label-cap", text: "Asking" }),
-          U.el("div", { class: "bb-mao__askv", text: U.fmtUSD(d.asking) })])
+        U.el("div", {}, [
+          U.el("div", { class: "label-cap", text: "Tax-free equity captured (after-tax, after-carry, ~" + (Math.round(d.holdYears * 10) / 10) + "yr)" }),
+          U.el("div", { class: "bb-mao__big" + (profitable ? "" : " is-neg"), text: U.fmtUSD(d.economicEquityAfterTax) }),
+          U.el("div", { class: "bb-mao__roi", text: d.roi != null
+            ? U.fmtPct(d.roi) + " cash-on-cash · " + roiTxt + " · " + U.fmtUSD(d.cashInvested) + " all-in cash" : "" })
+        ]),
+        U.el("div", { class: "bb-mao__ask" }, [U.el("div", { class: "label-cap", text: "Lot price" }),
+          U.el("div", { class: "bb-mao__askv", text: U.fmtUSD(d.lot) })])
       ]),
-      metaMeter(d),
+      valueMeter(d),
       U.el("div", { class: "meter__legend" }, [
-        U.el("span", {}, [U.el("i", { class: "swatch swatch--basis" }), "Within MAO"]),
-        d.gap > 0 ? U.el("span", {}, [U.el("i", { class: "swatch swatch--gain" }), "Buy room " + U.fmtUSDshort(d.gap)]) : null,
-        d.gap < 0 ? U.el("span", {}, [U.el("i", { class: "swatch swatch--over" }), "Over " + U.fmtUSDshort(-d.gap)]) : null
+        U.el("span", {}, [U.el("i", { class: "swatch swatch--basis" }), "All-in cost " + U.fmtUSDshort(d.allInBasis + d.carry + d.sellClosing)]),
+        profitable ? U.el("span", {}, [U.el("i", { class: "swatch swatch--gain" }), "Equity " + U.fmtUSDshort(d.economicEquityPreTax)]) : null,
+        !profitable ? U.el("span", {}, [U.el("i", { class: "swatch swatch--over" }), "Short " + U.fmtUSDshort((d.allInBasis + d.carry + d.sellClosing) - d.arv)]) : null,
+        U.el("span", {}, ["ARV " + U.fmtUSDshort(d.arv)])
       ])
     ]);
 
-    // breakdown
+    // footing waterfall — single running balance from ARV down to after-tax equity
     var rows = U.el("div", { class: "bb-rows" }, [
-      row("ARV at sale (" + U.fmtUSD(d.compPsf) + "/sqft × " + U.fmtSqft(assumptions.plannedSqft) + ")", U.fmtUSD(d.arv), { strong: true }),
-      row("− Build cost", "-" + U.fmtUSD(d.buildCost)),
-      assumptions.demoCost > 0 ? row("− Demolition", "-" + U.fmtUSD(assumptions.demoCost)) : null,
-      d.carryCost > 0 ? row("− Carry cost (taxes + ins.)", "-" + U.fmtUSD(d.carryCost)) : null,
-      row("− Sell-side closing", "-" + U.fmtUSD(d.sellClosing)),
-      row("− Target profit", "-" + U.fmtUSD(d.targetProfit)),
-      row("− Acquisition closing", "-" + U.fmtUSD(d.acqClosing)),
-      row("= Max allowable offer", U.fmtUSD(d.mao), { strong: true })
+      row("ARV at sale (" + U.fmtUSD(d.compPsf) + "/sqft × " + U.fmtSqft(d.sqft) + ", +appr)", U.fmtUSD(d.arv), { strong: true }),
+      row("− Sell-side closing (" + U.fmtPct(U.parseNum(assumptions.sellClosingPct)) + " of ARV)", "-" + U.fmtUSD(d.sellClosing)),
+      row("= Net sale proceeds", U.fmtUSD(d.netSaleProceeds), { sub: true }),
+      row("− Lot acquisition (from listing)", "-" + U.fmtUSD(d.lot)),
+      row("− Acquisition closing (" + U.fmtPct(U.parseNum(assumptions.acqClosingPct)) + " of lot)", "-" + U.fmtUSD(d.acqClosing)),
+      row("− Construction (" + U.fmtSqft(d.sqft) + " × " + U.fmtUSD(assumptions.costPerSqft) + ")", "-" + U.fmtUSD(d.construction)),
+      d.demo > 0 ? row("− Demolition / site prep", "-" + U.fmtUSD(d.demo)) : null,
+      row("= Taxable gain (§121)", U.fmtUSD(d.taxGain), { sub: true, neg: d.taxGain < 0 }),
+      row("− Carrying costs (not in basis, not deductible)", "-" + U.fmtUSD(d.carry)),
+      row("= Economic equity, pre-tax", U.fmtUSD(d.economicEquityPreTax), { sub: true, neg: d.economicEquityPreTax < 0 }),
+      d.taxOnExcess > 0 ? row("− §121 tax on excess (" + U.fmtPct(U.parseNum(assumptions.ltcgRate)) + " LTCG)", "-" + U.fmtUSD(d.taxOnExcess)) : null,
+      row("= After-tax equity captured", U.fmtUSD(d.economicEquityAfterTax), { strong: true, neg: d.economicEquityAfterTax < 0 })
     ]);
 
     // §121 eligibility checklist (advisory — only when there's gain to exclude)
@@ -445,12 +515,15 @@
       });
       if (!allEligChecked) {
         checklistEl.appendChild(U.el("p", { class: "bb-elig-note",
-          text: "Complete the checklist to confirm §121 applies to your situation." }));
+          text: "Confirm all four or the gain may be taxable — if you don't occupy 24 months, the entire " +
+            U.fmtUSD(d.taxGain) + " gain is taxable (≈ " + U.fmtUSD(d.taxIfNoExclusion) + " at " +
+            U.fmtPct(U.parseNum(assumptions.ltcgRate)) + ")." }));
       }
     }
 
-    // §121 + flood chips
-    var s121Tone = over121 ? "bad" : (!gainExists ? "warn" : (allEligChecked ? "ok" : "warn"));
+    // chips
+    var s121Tone = d.overLimit ? "bad" : (!gainExists ? "warn" : (allEligChecked ? "ok" : "warn"));
+    var lotTone = d.lotToArv <= LOT_FLOOR ? "ok" : (d.lotToArv >= LOT_CEIL ? "bad" : "warn");
     var chips = U.el("div", { class: "bb-chips" }, [
       U.el("div", { class: "bb-chip bb-chip--" + floodTone(listing.floodZone) }, [
         U.el("span", { class: "label-cap", text: "FEMA flood" }),
@@ -460,20 +533,48 @@
         U.el("span", { class: "label-cap", text: "§121" }),
         U.el("strong", { text: !gainExists
           ? "No gain yet"
-          : (over121 ? "Over by " + U.fmtUSDshort(-d.d121.headroom) : U.fmtUSDshort(d.d121.headroom) + " left") }),
+          : (d.overLimit ? "Over cap by " + U.fmtUSDshort(d.taxGain - d.limit) : U.fmtUSDshort(d.headroom) + " left") }),
         (!allEligChecked && gainExists)
           ? U.el("span", { class: "bb-elig-cav", text: "⚠ Verify eligibility" })
           : null
       ]),
+      U.el("div", { class: "bb-chip bb-chip--" + lotTone }, [
+        U.el("span", { class: "label-cap", text: "Lot vs ARV" }),
+        U.el("strong", { text: U.fmtPct(d.lotToArv, 0) + " of ARV" })
+      ]),
       U.el("div", { class: "bb-chip" }, [
+        U.el("span", { class: "label-cap", text: "Return" }),
+        U.el("strong", { text: roiTxt })
+      ]),
+      U.el("div", { class: "bb-chip" + (d.noComps ? " bb-chip--bad" : "") }, [
         U.el("span", { class: "label-cap", text: "Comps" }),
-        U.el("strong", { text: (listing.compCount || 0) + " @ " + U.fmtUSD(d.compPsf) + "/sf" })
+        U.el("strong", { text: d.noComps ? "ARV unverified" : (listing.compCount || 0) + " @ " + U.fmtUSD(d.compPsf) + "/sf" })
+      ]),
+      U.el("div", { class: "bb-chip" }, [
+        U.el("span", { class: "label-cap", text: "Max build for breakeven" }),
+        U.el("strong", { text: d.maxBuildBudget > 0
+          ? U.fmtUSDshort(d.maxBuildBudget) + " (~" + U.fmtSqft(d.maxSqft) + ")" : "—" })
       ])
     ]);
 
-    var tax = over121 ? U.el("div", { class: "tax-note" }, []) : null;
-    if (tax) tax.innerHTML = "Projected gain exceeds the §121 exclusion — est. tax on excess <strong>" +
-      U.fmtUSD(d.d121.taxOnExcess) + "</strong> (15% LT cap-gains). Drags your real net.";
+    // notes: tax-vs-cash wedge, over-cap tax, comp gate, downside, tax caveat
+    var notes = [];
+    if (gainExists && profitable && Math.round(d.taxGain) !== Math.round(d.economicEquityAfterTax)) {
+      notes.push("Taxable gain (" + U.fmtUSD(d.taxGain) + ") is larger than your real after-tax profit (" +
+        U.fmtUSD(d.economicEquityAfterTax) + ") — carrying costs reduce cash but not the §121 gain.");
+    }
+    if (d.overLimit) {
+      notes.push("Gain exceeds the " + U.fmtUSD(d.limit) + " §121 cap — est. tax on excess " +
+        U.fmtUSD(d.taxOnExcess) + " (" + U.fmtPct(U.parseNum(assumptions.ltcgRate)) + " LTCG, before NIIT/state).");
+    }
+    if (d.noComps) {
+      notes.push("No/low comp data — ARV is unverified, so the verdict is capped at Maybe. Enter a comp $/sqft to refine.");
+    } else if (d.equityLow < 0 && profitable) {
+      notes.push("Downside: at the low comp ($" + Math.round(U.parseNum(listing.lowPsf)) + "/sf) this deal loses " +
+        U.fmtUSD(-d.equityLow) + ". Thin margin.");
+    }
+    notes.push("15% LTCG is a floor — NIIT (3.8%), state tax, and any depreciation recapture aren't modeled. Estimates only, not tax advice.");
+    var tax = U.el("div", { class: "tax-note" }, [notes.join("  ")]);
 
     var actions = U.el("div", { class: "input-actions" }, [
       U.el("button", { class: "btn btn--primary", type: "button", onclick: save }, ["＋ Save analysis"]),
@@ -482,7 +583,7 @@
     ]);
 
     resultHost.appendChild(head);
-    resultHost.appendChild(mao);
+    resultHost.appendChild(equityBlock);
     resultHost.appendChild(chips);
     if (checklistEl) resultHost.appendChild(checklistEl);
     resultHost.appendChild(rows);
@@ -519,8 +620,9 @@
       askingPrice: listing.askingPrice, floodZone: listing.floodZone,
       compPsf: listing.compPsf, compCount: listing.compCount,
       assumptions: Object.assign({}, assumptions),
-      derived: { arv: d.arv, mao: d.mao, gap: d.gap, score: d.score, verdict: d.verdict,
-        grossEquity: d.d121.grossEquity, taxOnExcess: d.d121.taxOnExcess }
+      derived: { arv: d.arv, allInBasis: d.allInBasis, equityAfterTax: d.economicEquityAfterTax,
+        roi: d.roi, annualizedRoi: d.annualizedRoi, taxGain: d.taxGain, taxOnExcess: d.taxOnExcess,
+        score: d.score, verdict: d.verdict }
     };
     var arr = loadSaved(); arr.push(rec); writeSaved(arr);
     drawSaved(); flash("Saved");
@@ -571,19 +673,22 @@
 
   function savedCard(r) {
     var v = r.derived || {};
+    // equityAfterTax (new) or fall back to legacy mao field for old records
+    var equity = v.equityAfterTax != null ? v.equityAfterTax : (v.mao != null ? v.mao : 0);
+    var roiTxt = v.annualizedRoi != null ? U.fmtPct(v.annualizedRoi) + "/yr" : "—";
     return U.el("div", { class: "card" }, [
       U.el("div", { class: "card__top" }, [
         U.el("div", {}, [
-          U.el("div", { class: "card__zip", text: U.fmtUSD(v.mao || 0) }),
+          U.el("div", { class: "card__zip" + (equity < 0 ? " is-neg" : ""), text: U.fmtUSD(equity) }),
           U.el("div", { class: "card__label", text: r.address || r.sourceUrl || "—" })
         ]),
         U.el("span", { class: "card__flag " + (v.verdict === "go" ? "card__flag--ok" : v.verdict === "pass" ? "card__flag--over" : ""),
           text: "Score " + (v.score != null ? v.score : "–") })
       ]),
       U.el("div", { class: "card__rows" }, [
-        crow("Asking", U.fmtUSD(r.askingPrice || 0)),
-        crow("Max offer", U.fmtUSD(v.mao || 0)),
-        crow("Gap", U.fmtUSD(v.gap || 0)),
+        crow("Lot price", U.fmtUSD(r.askingPrice || 0)),
+        crow("After-tax equity", U.fmtUSD(equity)),
+        crow("Return", roiTxt),
         crow("Flood", "Zone " + (r.floodZone || "—"))
       ]),
       U.el("div", { class: "card__actions" }, [
@@ -620,8 +725,7 @@
     els.acqClosingPct.value = pctInput(assumptions.acqClosingPct);
     els.carryPct.value = pctInput(assumptions.carryPct);
     els.demoCost.value = assumptions.demoCost;
-    els.targetMode.value = assumptions.targetMode;
-    els.targetValue.value = assumptions.targetValue;
+    els.ltcgRate.value = pctInput(assumptions.ltcgRate);
   }
 
   // ---- init ----------------------------------------------------------
@@ -636,8 +740,8 @@
     // listing facts (editable — doubles as manual entry)
     var listingGrid = U.el("div", { class: "field-grid" }, [
       field("address", "Address", { text: true, full: true, placeholder: "123 Main St, Houston, TX 77007" }),
-      field("askingPrice", "Asking price", { money: true }),
-      field("compPsf", "Comp median $/sqft", { money: true }),
+      field("askingPrice", "Lot price (raw land)", { money: true, note: "Acquisition cost — from the listing or typed in" }),
+      field("compPsf", "Comp median $/sqft", { money: true, note: "Nearby finished homes → drives ARV" }),
       field("compCount", "# comps", {}),
       field("floodZone", "FEMA flood zone", { type: "select", options: FLOOD_ZONES })
     ]);
@@ -645,25 +749,21 @@
     // build assumptions
     var assumpGrid = U.el("div", { class: "field-grid" }, [
       field("plannedSqft", "Planned build size", { post: "sqft" }),
-      field("costPerSqft", "Cost / sqft", { money: true }),
+      field("costPerSqft", "Build cost / sqft", { money: true }),
       field("appreciationRate", "Appreciation / yr", { pct: true }),
       field("holdMonths", "Hold period", { post: "mo" }),
       field("filingStatus", "Filing status", { type: "select", options: [["mfj", "Married — joint"], ["single", "Single"]] }),
       field("sellClosingPct", "Sell-side closing", { pct: true }),
       field("acqClosingPct", "Acquisition closing", { pct: true }),
-      field("carryPct", "Annual carry cost", { pct: true }),
+      field("carryPct", "Annual carry cost", { pct: true, note: "Tax + insurance + utilities" }),
       field("demoCost", "Demolition cost", { money: true }),
-      field("targetMode", "Target profit basis", { type: "select", options: [["pct", "% of ARV"], ["usd", "$ fixed"]] }),
-      field("targetValue", "Target profit", { note: "% of ARV" })
+      field("ltcgRate", "LT cap-gains rate", { pct: true, note: "On gain above the §121 cap" })
     ]);
-    // give the target value note an id we update
-    var tnote = assumpGrid.querySelector("#bb_targetValue_note");
-    if (tnote) tnote.id = "bb_target_suffix";
 
     var inputPanel = U.el("section", { class: "panel" }, [
       U.el("div", { class: "panel-head" }, [
         U.el("h2", { text: "Listing" }),
-        U.el("p", { text: "Drop a Zillow URL and Analyze, or fill the fields by hand." })
+        U.el("p", { text: "Drop a raw-land URL and Analyze, or fill the fields by hand." })
       ]),
       urlRow, statusHost, listingGrid,
       U.el("div", { class: "bb-subhead" }, [U.el("h3", { text: "Build assumptions" })]),

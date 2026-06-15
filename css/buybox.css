@@ -58,11 +58,13 @@
 .bb-verdict--pass .bb-verdict__badge { color: var(--red); }
 .bb-verdict__sub { font-size: var(--fs-sm); color: var(--ink-soft); margin-top: 2px; }
 
-/* ---- MAO vs asking ---- */
+/* ---- equity headline (after-tax equity vs lot price) ---- */
 .bb-mao { margin-bottom: var(--sp-4); }
-.bb-mao__heads { display: flex; justify-content: space-between; align-items: flex-end; margin-bottom: var(--sp-2); }
+.bb-mao__heads { display: flex; justify-content: space-between; align-items: flex-end; gap: var(--sp-3); margin-bottom: var(--sp-2); }
 .bb-mao__big { font-size: var(--fs-2xl); font-weight: 800; letter-spacing: -1px; color: var(--ink); }
-.bb-mao__ask { text-align: right; }
+.bb-mao__big.is-neg { color: var(--red); }
+.bb-mao__roi { font-size: var(--fs-xs); color: var(--muted); margin-top: 2px; font-variant-numeric: tabular-nums; }
+.bb-mao__ask { text-align: right; flex: none; }
 .bb-mao__askv { font-size: var(--fs-lg); font-weight: 700; color: var(--ink-soft); }
 
 /* ---- chips ---- */
@@ -104,11 +106,16 @@
 .bb-row__k { color: var(--ink-soft); }
 .bb-row__v { font-weight: 650; font-variant-numeric: tabular-nums; }
 .bb-row__v.is-neg { color: var(--red); }
+/* running-balance subtotals (= net proceeds / taxable gain / economic equity) */
+.bb-row--sub { background: #f4f7fb; }
+.bb-row--sub .bb-row__k { color: var(--ink); font-weight: 700; }
+.bb-row--sub .bb-row__v { font-weight: 800; }
 .bb-row--strong { background: #fafbfc; }
 .bb-row--strong .bb-row__k { color: var(--ink); font-weight: 650; }
 .bb-row--strong .bb-row__v { font-size: var(--fs-base); }
 .bb-row--strong:last-child { background: linear-gradient(180deg, #fdf6e6, var(--gold-tint)); }
 .bb-row--strong:last-child .bb-row__v { color: var(--gold-dark); font-weight: 800; }
+.bb-row--strong:last-child .bb-row__v.is-neg { color: var(--red); }
 
 /* ---- comp address list ---- */
 .bb-comps {
