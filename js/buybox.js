@@ -291,6 +291,20 @@
 
   function recalc() { readInputs(); renderResult(); updateTargetSuffix(); }
 
+  function reset() {
+    listing.url = ""; listing.address = ""; listing.askingPrice = 0;
+    listing.compPsf = 0; listing.compCount = 0; listing.lowPsf = 0;
+    listing.highPsf = 0; listing.asOf = null; listing.floodZone = "X";
+    listing.lat = null; listing.lng = null; listing.compDetails = [];
+    assumptions = Object.assign({}, ASSUMPTION_DEFAULTS);
+    eligChecked = [false, false, false, false];
+    els.url.value = "";
+    status("", "");
+    syncListingInputs();
+    setAssumptionInputs();
+    recalc();
+  }
+
   function updateTargetSuffix() {
     var n = document.getElementById("bb_target_suffix");
     if (n) n.textContent = assumptions.targetMode === "usd" ? "$ (fixed)" : "% of ARV";
@@ -615,7 +629,8 @@
     // URL intake row
     els.url = U.el("input", { id: "bb_url", type: "text", placeholder: "Paste a Zillow listing URL…" });
     var analyzeBtn = U.el("button", { class: "btn btn--primary", type: "button", onclick: analyze }, ["Analyze"]);
-    var urlRow = U.el("div", { class: "bb-urlrow" }, [els.url, analyzeBtn]);
+    var resetBtn = U.el("button", { class: "btn btn--ghost", type: "button", onclick: reset, title: "Clear all fields and start fresh" }, ["Reset"]);
+    var urlRow = U.el("div", { class: "bb-urlrow" }, [els.url, analyzeBtn, resetBtn]);
     statusHost = U.el("div", { class: "bb-status", id: "bb_status" });
 
     // listing facts (editable — doubles as manual entry)
