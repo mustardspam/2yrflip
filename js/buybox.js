@@ -49,7 +49,7 @@
   var listing = {            // editable listing facts (from API/mock or manual)
     url: "", address: "", askingPrice: 0, compPsf: 0,
     compCount: 0, lowPsf: 0, highPsf: 0, asOf: null,
-    floodZone: "X", lat: null, lng: null
+    floodZone: "X", lat: null, lng: null, compDetails: []
   };
   var assumptions = Object.assign({}, ASSUMPTION_DEFAULTS);
 
@@ -182,6 +182,7 @@
     listing.floodZone = d.floodZone || "X";
     listing.lat = d.lat != null ? d.lat : null;
     listing.lng = d.lng != null ? d.lng : null;
+    listing.compDetails = (d.comps && Array.isArray(d.comps.compDetails)) ? d.comps.compDetails : [];
     syncListingInputs();
     recalc();
   }
@@ -472,6 +473,26 @@
     if (checklistEl) resultHost.appendChild(checklistEl);
     resultHost.appendChild(rows);
     if (tax) resultHost.appendChild(tax);
+
+    // comp address list (only when we have detail from the API)
+    if (listing.compDetails && listing.compDetails.length) {
+      var compList = U.el("div", { class: "bb-comps" });
+      compList.appendChild(U.el("div", { class: "bb-comps__head", text: "Comps used (" + listing.compDetails.length + ")" }));
+      listing.compDetails.forEach(function (c) {
+        var dist = c.distance != null ? " · " + (+c.distance).toFixed(1) + " mi" : "";
+        var meta = [
+          c.price ? U.fmtUSD(c.price) : null,
+          c.sqft ? U.fmtSqft(c.sqft) + " sqft" : null,
+          c.psf ? U.fmtUSD(c.psf) + "/sf" : null
+        ].filter(Boolean).join(" · ");
+        compList.appendChild(U.el("div", { class: "bb-comp-row" }, [
+          U.el("span", { class: "bb-comp-addr", text: c.address || "Address unavailable" }),
+          U.el("span", { class: "bb-comp-meta", text: meta + dist })
+        ]));
+      });
+      resultHost.appendChild(compList);
+    }
+
     resultHost.appendChild(actions);
   }
 

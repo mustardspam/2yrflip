@@ -149,13 +149,20 @@ async function getComps(address: string, sqft: number | null, propertyType: stri
   const avm = await rcGet(`/avm/value?${params.toString()}`, dbg);
   if (!avm) return null;
   const comps = Array.isArray(avm.comparables) ? avm.comparables : [];
-  const perSqft = comps.map((c: any) => {
+  const compDetails = comps.map((c: any) => {
     const price = c.price ?? c.listPrice ?? c.lastSalePrice;
-    return price && c.squareFootage ? price / c.squareFootage : null;
-  }).filter((v: number | null): v is number => !!v && isFinite(v));
-  if (!perSqft.length) return { medianPerSqft: 0, count: 0, lowPerSqft: 0, highPerSqft: 0, asOf: null };
+    const psf = price && c.squareFootage ? Math.round(price / c.squareFootage) : null;
+    const addr = [c.addressLine1, c.city, c.state, c.zipCode].filter(Boolean).join(", ")
+      || c.address || "";
+    return psf != null && isFinite(psf)
+      ? { address: addr, price: price ?? null, sqft: c.squareFootage ?? null, psf, distance: c.distance ?? null }
+      : null;
+  }).filter(Boolean);
+  if (!compDetails.length) return { medianPerSqft: 0, count: 0, lowPerSqft: 0, highPerSqft: 0, asOf: null, compDetails: [] };
+  const perSqft = compDetails.map((c: any) => c.psf);
   return { medianPerSqft: Math.round(median(perSqft)), count: perSqft.length,
-    lowPerSqft: Math.round(Math.min(...perSqft)), highPerSqft: Math.round(Math.max(...perSqft)), asOf: avm.asOf ?? null };
+    lowPerSqft: Math.round(Math.min(...perSqft)), highPerSqft: Math.round(Math.max(...perSqft)),
+    asOf: avm.asOf ?? null, compDetails };
 }
 
 // ---- FEMA flood zone ---------------------------------------

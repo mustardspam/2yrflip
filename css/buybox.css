@@ -110,6 +110,38 @@
 .bb-row--strong:last-child { background: linear-gradient(180deg, #fdf6e6, var(--gold-tint)); }
 .bb-row--strong:last-child .bb-row__v { color: var(--gold-dark); font-weight: 800; }
 
+/* ---- comp address list ---- */
+.bb-comps {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: #fff;
+  overflow: hidden;
+  box-shadow: var(--shadow-sm);
+  margin-bottom: var(--sp-4);
+}
+.bb-comps__head {
+  font-size: var(--fs-xs);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--muted);
+  padding: var(--sp-2) var(--sp-4);
+  background: #f7f9fb;
+  border-bottom: 1px solid var(--line-soft);
+}
+.bb-comp-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: var(--sp-3);
+  padding: 7px var(--sp-4);
+  font-size: var(--fs-sm);
+  border-bottom: 1px solid var(--line-soft);
+}
+.bb-comp-row:last-child { border-bottom: none; }
+.bb-comp-addr { color: var(--ink); font-weight: 550; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bb-comp-meta { color: var(--muted); font-size: var(--fs-xs); white-space: nowrap; font-variant-numeric: tabular-nums; }
+
 /* ---- §121 eligibility checklist ---- */
 .bb-elig-cav {
   display: block;
