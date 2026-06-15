@@ -230,7 +230,9 @@
         "apikey": cfg.SUPABASE_ANON_KEY || "",
         "x-app-pass": pass
       },
-      body: JSON.stringify({ url: listing.url, address: els.address.value.trim() || undefined })
+      body: JSON.stringify(listing.url
+        ? { url: listing.url }
+        : { address: els.address.value.trim() })
     }).then(function (res) {
       return res.json().then(function (j) { return { status: res.status, ok: res.ok, j: j }; });
     }).then(function (r) {
