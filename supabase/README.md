@@ -23,9 +23,32 @@ server-side secret; the browser only ever talks to this function.
 
 ```bash
 supabase secrets set RENTCAST_KEY=your_rentcast_key_here
+supabase secrets set APP_PASSCODE=choose-a-strong-passcode     # gates all access
+supabase secrets set MONTHLY_CALL_CAP=48                       # hard cap (~22 lookups)
 # Lock CORS to your Pages origin (recommended). Use * only for local testing.
 supabase secrets set ALLOWED_ORIGIN=https://mustardspam.github.io
 ```
+
+> Dashboard equivalent: **Edge Functions → Secrets → Add secret** for each of the above.
+
+## Lockdown (cost + access control)
+
+The function is protected by three layers (see `index.ts`):
+
+1. **Passcode gate** — every request must send `x-app-pass` matching `APP_PASSCODE`. The app
+   prompts you for it once and stores it in your browser. **Never commit the passcode.**
+2. **Hard monthly cap** — `MONTHLY_CALL_CAP` RentCast calls/month, tracked in Postgres. The
+   function refuses *before* calling RentCast once you hit it, so overage billing is impossible.
+   Each lookup costs ~2 RentCast calls, so `48` ≈ ~22 lookups/month (safely under the free 50).
+3. **Address cache** — repeat lookups of the same address that month are served from cache and
+   don't re-bill.
+
+**Required one-time DB setup** — run [`usage_setup.sql`](usage_setup.sql) in
+**Supabase → SQL Editor** before/after deploying. It creates the usage counter + cache tables
+(both RLS-locked; only the function's service role can touch them).
+
+> Belt-and-suspenders: also set a hard usage/spend limit in your **RentCast** billing settings so
+> the cap exists at the source too.
 
 ## Deploy
 

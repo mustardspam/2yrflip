@@ -172,6 +172,15 @@
     statusHost.className = "bb-status" + (kind ? " bb-status--" + kind : "");
   }
 
+  function getPass() {
+    var p = localStorage.getItem("bb_passcode");
+    if (!p) {
+      p = (window.prompt("Enter the Buy Box access passcode:") || "").trim();
+      if (p) localStorage.setItem("bb_passcode", p);
+    }
+    return p;
+  }
+
   function analyze() {
     listing.url = els.url.value.trim();
     var cfg = window.BUYBOX_CONFIG || {};
@@ -179,30 +188,46 @@
       status("Paste a Zillow URL or type an address below, then Analyze.", "warn");
       return;
     }
-    status("Analyzing…", "loading");
 
     if (cfg.USE_MOCK || !cfg.FUNCTION_URL) {
       // mock path (pre-deploy / demo)
+      status("Analyzing…", "loading");
       var d = mockData({ url: listing.url, address: els.address.value.trim() });
       applyData(d);
       status("Sample data (mock mode). Deploy the Edge Function for live data.", "info");
       return;
     }
 
+    var pass = getPass();
+    if (!pass) { status("Passcode required for live lookups.", "warn"); return; }
+    status("Analyzing…", "loading");
+
     fetch(cfg.FUNCTION_URL, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         "Authorization": "Bearer " + (cfg.SUPABASE_ANON_KEY || ""),
-        "apikey": cfg.SUPABASE_ANON_KEY || ""
+        "apikey": cfg.SUPABASE_ANON_KEY || "",
+        "x-app-pass": pass
       },
       body: JSON.stringify({ url: listing.url, address: els.address.value.trim() || undefined })
     }).then(function (res) {
-      return res.json().then(function (j) { return { ok: res.ok, j: j }; });
+      return res.json().then(function (j) { return { status: res.status, ok: res.ok, j: j }; });
     }).then(function (r) {
+      if (r.status === 401) {
+        localStorage.removeItem("bb_passcode");
+        status("Passcode rejected. Click Analyze to re-enter it.", "error");
+        return;
+      }
+      if (r.status === 429) {
+        status(r.j.error || "Monthly lookup limit reached. Enter details manually.", "error");
+        return;
+      }
       if (!r.ok) { status(r.j.error || "Lookup failed. Enter details manually below.", "error"); return; }
       applyData(r.j);
-      status("Live data loaded for " + (r.j.address || "listing") + ".", "ok");
+      var u = r.j.usage;
+      var quota = u ? "  ·  " + u.used + "/" + u.cap + " lookups used this month" : "";
+      status("Live data loaded for " + (r.j.address || "listing") + (r.j.cached ? " (cached)" : "") + "." + quota, "ok");
     }).catch(function () {
       status("Network error. Enter details manually below.", "error");
     });
