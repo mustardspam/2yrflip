@@ -53,8 +53,17 @@ The function is protected by three layers (see `index.ts`):
 ## Deploy
 
 ```bash
-supabase functions deploy buybox
+supabase functions deploy buybox --no-verify-jwt
 ```
+
+> **`--no-verify-jwt` is required.** With JWT verification on, Supabase's gateway
+> rejects the browser's CORS preflight (`OPTIONS` carries no `Authorization` header)
+> with `UNAUTHORIZED_NO_AUTH_HEADER`, so the real request never fires. The function
+> does its own auth via the `x-app-pass` passcode and the anon key is public anyway,
+> so gateway JWT verification adds no security — it only breaks browser calls.
+> `config.toml` already sets `verify_jwt = false`; the flag makes it explicit.
+> **Dashboard deploys:** Edge Functions → buybox → Details → turn **Enforce JWT
+> Verification** OFF.
 
 After deploy your endpoint is:
 ```

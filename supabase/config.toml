@@ -5,7 +5,9 @@
 project_id = "2yrflip"
 
 [functions.buybox]
-# The client sends the project anon key as a Bearer token, which is a valid JWT,
-# so JWT verification can stay on. Set to false only if you want a fully public
-# endpoint with no key at all.
-verify_jwt = true
+# verify_jwt MUST be false for browser calls: with it on, Supabase's gateway
+# rejects the CORS preflight (browsers don't send Authorization on OPTIONS) with
+# "UNAUTHORIZED_NO_AUTH_HEADER", so the real request never fires. Security is not
+# lost — the function enforces its own passcode (x-app-pass vs APP_PASSCODE) and
+# the anon key is public anyway. The hard monthly cap + cache still gate cost.
+verify_jwt = false
