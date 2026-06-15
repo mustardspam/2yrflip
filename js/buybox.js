@@ -14,7 +14,10 @@
     ["X500", "X (shaded) — moderate"],
     ["A", "A — high risk (SFHA)"],
     ["AE", "AE — high risk (SFHA)"],
+    ["AH", "AH — high risk (SFHA)"],
     ["AO", "AO — high risk (SFHA)"],
+    ["A99", "A99 — high risk (SFHA)"],
+    ["V", "V — coastal high risk"],
     ["VE", "VE — coastal high risk"],
     ["D", "D — undetermined"],
     ["UNKNOWN", "Unknown"]
@@ -239,8 +242,12 @@
     els.askingPrice.value = listing.askingPrice || "";
     els.compPsf.value = listing.compPsf || "";
     els.compCount.value = listing.compCount || "";
-    els.floodZone.value = FLOOD_ZONES.some(function (z) { return z[0] === listing.floodZone; })
-      ? listing.floodZone : "UNKNOWN";
+    // Preserve any FEMA-reported zone even if it's not a preset option,
+    // so scoring uses the real zone instead of collapsing to UNKNOWN.
+    var fz = els.floodZone, zone = listing.floodZone || "X";
+    var known = Array.prototype.some.call(fz.options, function (o) { return o.value === zone; });
+    if (!known) fz.appendChild(U.el("option", { value: zone, text: zone + " — (reported)" }));
+    fz.value = zone;
   }
 
   function readInputs() {
@@ -318,10 +325,13 @@
   }
 
   function metaMeter(d) {
-    var total = Math.max(d.mao, d.asking, 1);
-    var navy = Math.min(d.asking, d.mao);
-    var room = Math.max(0, d.mao - d.asking);
-    var over = Math.max(0, d.asking - d.mao);
+    // Clamp MAO at 0 so a negative MAO (deal can't pencil) renders as all-red,
+    // not a negative-width segment relying on browser clamping.
+    var maoPos = Math.max(0, d.mao);
+    var total = Math.max(maoPos, d.asking, 1);
+    var navy = Math.max(0, Math.min(d.asking, maoPos));
+    var room = Math.max(0, maoPos - d.asking);
+    var over = Math.max(0, d.asking - maoPos);
     var segs = [
       U.el("div", { class: "meter__seg meter__seg--basis", style: "width:" + (navy / total * 100) + "%", title: "Within MAO" }),
       U.el("div", { class: "meter__seg meter__seg--gain", style: "width:" + (room / total * 100) + "%", title: "Buy room" }),
@@ -437,7 +447,7 @@
   function sendToCalc() {
     if (!window.Calculator || !window.Calculator.loadScenario) return;
     window.Calculator.loadScenario({
-      zip: listing.floodZone ? "" : "", label: listing.address || "From Buy Box",
+      zip: "", label: listing.address || "From Buy Box",
       lotCost: listing.askingPrice, sqft: assumptions.plannedSqft,
       costPerSqft: assumptions.costPerSqft, arvPerSqft: listing.compPsf,
       appreciationRate: assumptions.appreciationRate, holdMonths: assumptions.holdMonths,

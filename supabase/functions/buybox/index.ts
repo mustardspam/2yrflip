@@ -21,7 +21,9 @@
 
 const RENTCAST_KEY = Deno.env.get("RENTCAST_KEY") ?? "";
 const APP_PASSCODE = Deno.env.get("APP_PASSCODE") ?? "";
-const CAP = parseInt(Deno.env.get("MONTHLY_CALL_CAP") ?? "48", 10);
+const CAP_RAW = parseInt(Deno.env.get("MONTHLY_CALL_CAP") ?? "48", 10);
+// Guard: a misconfigured (NaN / <=0) cap must NOT silently disable the limit.
+const CAP = Number.isFinite(CAP_RAW) && CAP_RAW > 0 ? CAP_RAW : 48;
 const ALLOWED_ORIGIN = Deno.env.get("ALLOWED_ORIGIN") ?? "*";
 const SB_URL = Deno.env.get("SUPABASE_URL") ?? "";
 const SB_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
@@ -63,9 +65,13 @@ async function getUsage(month: string): Promise<number> {
     return Number(await r.json()) || 0;
   } catch { return 0; }
 }
-async function addUsage(month: string, n: number) {
-  if (n <= 0) return;
-  try { await pg("rpc/add_usage", { method: "POST", body: JSON.stringify({ p_month: month, p_n: n }) }); } catch { /* ignore */ }
+async function addUsage(month: string, n: number): Promise<number | null> {
+  if (n <= 0) return null;
+  try {
+    const r = await pg("rpc/add_usage", { method: "POST", body: JSON.stringify({ p_month: month, p_n: n }) });
+    if (!r.ok) return null;
+    return Number(await r.json()) || null;   // add_usage returns the new monthly total
+  } catch { return null; }
 }
 async function cacheGet(addr: string, month: string): Promise<any | null> {
   try {
@@ -228,8 +234,8 @@ Deno.serve(async (req) => {
       : Promise.resolve({ floodZone: "UNKNOWN", floodDesc: "No coordinates for flood lookup" }),
   ]);
 
-  const newUsed = (await getUsage(month)) + billed();
-  await addUsage(month, billed());
+  const n = billed();
+  const newUsed = (await addUsage(month, n)) ?? (used + n);
 
   const payload = {
     source: "rentcast+fema", address, zip: zipFromAddress(address),
