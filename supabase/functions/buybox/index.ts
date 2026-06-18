@@ -145,10 +145,10 @@ async function getListing(address: string, dbg: string[]) {
   return { askingPrice: p.lastSalePrice ?? null, existingSqft: p.squareFootage ?? null, lotSizeSqft: p.lotSize ?? null,
     lat: p.latitude ?? null, lng: p.longitude ?? null, propertyType: p.propertyType ?? null };
 }
-async function getComps(address: string, sqft: number | null, propertyType: string | null, dbg: string[]) {
-  const params = new URLSearchParams({ address });
+async function getComps(address: string, sqft: number | null, _propertyType: string | null, dbg: string[]) {
+  const params = new URLSearchParams({ address, propertyType: "Single Family" });
+  // sqft: pass only if the subject has an existing structure; vacant lots have null sqft
   if (sqft) params.set("squareFootage", String(sqft));
-  if (propertyType) params.set("propertyType", propertyType);
   const avm = await rcGet(`/avm/value?${params.toString()}`, dbg);
   if (!avm) return null;
   const comps = Array.isArray(avm.comparables) ? avm.comparables : [];
