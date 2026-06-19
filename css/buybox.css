@@ -67,6 +67,16 @@
 .bb-mao__ask { text-align: right; flex: none; }
 .bb-mao__askv { font-size: var(--fs-lg); font-weight: 700; color: var(--ink-soft); }
 
+/* ---- permanent financing (monthly note) ---- */
+.bb-fin { margin-bottom: var(--sp-4); }
+.bb-fin__heads { display: flex; justify-content: space-between; align-items: flex-end; gap: var(--sp-3); margin-bottom: var(--sp-3); }
+.bb-fin__big { font-size: var(--fs-2xl); font-weight: 800; letter-spacing: -1px; color: var(--ink); }
+.bb-fin__loan { text-align: right; flex: none; }
+.bb-fin__loanv { font-size: var(--fs-lg); font-weight: 700; color: var(--ink-soft); }
+.bb-fin__ltv { font-size: var(--fs-xs); color: var(--muted); margin-top: 2px; }
+.bb-fin__ltv.is-warn { color: var(--gold-dark); font-weight: 700; }
+.bb-fin__note { font-size: var(--fs-xs); color: var(--muted); margin-top: var(--sp-3); line-height: 1.5; }
+
 /* ---- chips ---- */
 .bb-chips { display: grid; grid-template-columns: repeat(3, 1fr); gap: var(--sp-2); margin-bottom: var(--sp-4); }
 .bb-chip {

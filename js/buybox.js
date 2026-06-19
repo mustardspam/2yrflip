@@ -43,7 +43,13 @@
     acqClosingPct: 0.015,
     carryPct: 0.03,      // annual carry: property tax + insurance + utilities (non-deductible, NOT in tax basis)
     demoCost: 0,
-    ltcgRate: 0.15       // assumed LT cap-gains rate on gain above the §121 cap
+    ltcgRate: 0.15,      // assumed LT cap-gains rate on gain above the §121 cap
+    // permanent financing (construction loan rolls into this at completion)
+    mortgageRate: 0.065,
+    mortgageTermYears: 30,
+    propertyTaxRate: 0.018,   // annual, % of value at completion
+    homeInsuranceRate: 0.0045,// annual, % of value at completion
+    pmiRate: 0.006            // annual, % of loan — applied only when LTV > 80%
   };
 
   var ELIG_CHECKS = [
@@ -112,6 +118,29 @@
 
     var economicEquityAfterTax = economicEquityPreTax - taxOnExcess;
 
+    // --- permanent financing -------------------------------------------
+    // Construction-to-perm: lot bought cash (collateral for the construction
+    // loan); at completion the loan rolls into a traditional mortgage sized
+    // to just the construction cost — the cash-bought lot is the borrower's
+    // equity, so it "takes a chunk out of the loan" rather than being financed.
+    var valueAtCompletion = sqft * compPsf;              // appraised value when built, BEFORE the 2yr hold's appreciation
+    var landEquity = lot + acqClosing;                    // cash already in; reduces what must be borrowed
+    var loanAmount = Math.max(0, construction + demo);
+    var ltvAtCompletion = valueAtCompletion > 0 ? loanAmount / valueAtCompletion : null;
+    var pmiApplies = ltvAtCompletion != null && ltvAtCompletion > 0.80;
+
+    var monthlyRate = U.parseNum(a.mortgageRate) / 12;
+    var termMonths = U.parseNum(a.mortgageTermYears) * 12;
+    var monthlyPI = termMonths > 0
+      ? (monthlyRate > 0
+          ? loanAmount * (monthlyRate * Math.pow(1 + monthlyRate, termMonths)) / (Math.pow(1 + monthlyRate, termMonths) - 1)
+          : loanAmount / termMonths)
+      : 0;
+    var monthlyTax = valueAtCompletion * U.parseNum(a.propertyTaxRate) / 12;
+    var monthlyInsurance = valueAtCompletion * U.parseNum(a.homeInsuranceRate) / 12;
+    var monthlyPMI = pmiApplies ? loanAmount * U.parseNum(a.pmiRate) / 12 : 0;
+    var monthlyPITI = monthlyPI + monthlyTax + monthlyInsurance + monthlyPMI;
+
     // --- returns ---
     var roi = cashInvested > 0 ? economicEquityAfterTax / cashInvested : null;
     var annualizedRoi = (roi != null && (1 + roi) > 0 && holdYears > 0)
@@ -172,6 +201,10 @@
       headroom: headroom, overLimit: overLimit, roi: roi, annualizedRoi: annualizedRoi,
       dispersion: dispersion, lotToArv: lotToArv, noComps: noComps,
       arvLow: arvLow, equityLow: equityLow, maxBuildBudget: maxBuildBudget, maxSqft: maxSqft,
+      valueAtCompletion: valueAtCompletion, landEquity: landEquity, loanAmount: loanAmount,
+      ltvAtCompletion: ltvAtCompletion, pmiApplies: pmiApplies,
+      monthlyPI: monthlyPI, monthlyTax: monthlyTax, monthlyInsurance: monthlyInsurance,
+      monthlyPMI: monthlyPMI, monthlyPITI: monthlyPITI,
       parts: parts, score: score, verdict: verdict
     };
   }
@@ -340,6 +373,11 @@
     assumptions.carryPct = U.parseNum(els.carryPct.value) / 100;
     assumptions.demoCost = U.parseNum(els.demoCost.value);
     assumptions.ltcgRate = U.parseNum(els.ltcgRate.value) / 100;
+    assumptions.mortgageRate = U.parseNum(els.mortgageRate.value) / 100;
+    assumptions.mortgageTermYears = U.parseNum(els.mortgageTermYears.value);
+    assumptions.propertyTaxRate = U.parseNum(els.propertyTaxRate.value) / 100;
+    assumptions.homeInsuranceRate = U.parseNum(els.homeInsuranceRate.value) / 100;
+    assumptions.pmiRate = U.parseNum(els.pmiRate.value) / 100;
   }
 
   function recalc() { readInputs(); renderResult(); }
@@ -485,6 +523,36 @@
       ])
     ]);
 
+    // permanent financing: construction loan rolls into a traditional mortgage at
+    // completion, sized to construction cost — the cash-bought lot is the equity.
+    var ltvTone = d.pmiApplies ? " is-warn" : "";
+    var finRows = U.el("div", { class: "bb-rows" }, [
+      row("Principal & interest", U.fmtUSD(d.monthlyPI)),
+      row("Property tax (" + U.fmtPct(U.parseNum(assumptions.propertyTaxRate)) + "/yr of value)", U.fmtUSD(d.monthlyTax)),
+      row("Homeowners insurance (" + U.fmtPct(U.parseNum(assumptions.homeInsuranceRate)) + "/yr of value)", U.fmtUSD(d.monthlyInsurance)),
+      d.pmiApplies ? row("PMI (LTV " + U.fmtPct(d.ltvAtCompletion, 0) + " > 80%)", U.fmtUSD(d.monthlyPMI)) : null,
+      row("= Est. monthly note (PITI" + (d.pmiApplies ? "+PMI" : "") + ")", U.fmtUSD(d.monthlyPITI), { strong: true })
+    ]);
+    var financingBlock = U.el("div", { class: "bb-fin" }, [
+      U.el("div", { class: "bb-fin__heads" }, [
+        U.el("div", {}, [
+          U.el("div", { class: "label-cap", text: "Est. monthly note once the construction loan rolls to perm" }),
+          U.el("div", { class: "bb-fin__big", text: U.fmtUSD(d.monthlyPITI) + "/mo" })
+        ]),
+        U.el("div", { class: "bb-fin__loan" }, [
+          U.el("div", { class: "label-cap", text: "Loan amount" }),
+          U.el("div", { class: "bb-fin__loanv", text: U.fmtUSD(d.loanAmount) }),
+          U.el("div", { class: "bb-fin__ltv" + ltvTone, text: d.ltvAtCompletion != null
+            ? U.fmtPct(d.ltvAtCompletion, 0) + " LTV at completion" : "LTV unverified (no comps)" })
+        ])
+      ]),
+      finRows,
+      U.el("p", { class: "bb-fin__note", text: "Lot (" + U.fmtUSD(d.landEquity) + ", paid cash) is the equity at conversion — " +
+        "the loan finances construction only (" + U.fmtUSD(d.loanAmount) + " at " +
+        U.fmtPct(U.parseNum(assumptions.mortgageRate)) + ", " + assumptions.mortgageTermYears + "yr fixed). " +
+        "Value at completion uses today's comp $/sqft, before the hold period's appreciation." })
+    ]);
+
     // footing waterfall — single running balance from ARV down to after-tax equity
     var rows = U.el("div", { class: "bb-rows" }, [
       row("ARV at sale (" + U.fmtUSD(d.compPsf) + "/sqft × " + U.fmtSqft(d.sqft) + ", +appr)", U.fmtUSD(d.arv), { strong: true }),
@@ -584,6 +652,7 @@
 
     resultHost.appendChild(head);
     resultHost.appendChild(equityBlock);
+    resultHost.appendChild(financingBlock);
     resultHost.appendChild(chips);
     if (checklistEl) resultHost.appendChild(checklistEl);
     resultHost.appendChild(rows);
@@ -622,7 +691,7 @@
       assumptions: Object.assign({}, assumptions),
       derived: { arv: d.arv, allInBasis: d.allInBasis, equityAfterTax: d.economicEquityAfterTax,
         roi: d.roi, annualizedRoi: d.annualizedRoi, taxGain: d.taxGain, taxOnExcess: d.taxOnExcess,
-        score: d.score, verdict: d.verdict }
+        score: d.score, verdict: d.verdict, monthlyPITI: d.monthlyPITI, loanAmount: d.loanAmount }
     };
     var arr = loadSaved(); arr.push(rec); writeSaved(arr);
     drawSaved(); flash("Saved");
@@ -689,6 +758,7 @@
         crow("Lot price", U.fmtUSD(r.askingPrice || 0)),
         crow("After-tax equity", U.fmtUSD(equity)),
         crow("Return", roiTxt),
+        crow("Monthly note", v.monthlyPITI != null ? U.fmtUSD(v.monthlyPITI) + "/mo" : "—"),
         crow("Flood", "Zone " + (r.floodZone || "—"))
       ]),
       U.el("div", { class: "card__actions" }, [
@@ -726,6 +796,11 @@
     els.carryPct.value = pctInput(assumptions.carryPct);
     els.demoCost.value = assumptions.demoCost;
     els.ltcgRate.value = pctInput(assumptions.ltcgRate);
+    els.mortgageRate.value = pctInput(assumptions.mortgageRate);
+    els.mortgageTermYears.value = assumptions.mortgageTermYears;
+    els.propertyTaxRate.value = pctInput(assumptions.propertyTaxRate);
+    els.homeInsuranceRate.value = pctInput(assumptions.homeInsuranceRate);
+    els.pmiRate.value = pctInput(assumptions.pmiRate);
   }
 
   // ---- init ----------------------------------------------------------
@@ -760,6 +835,16 @@
       field("ltcgRate", "LT cap-gains rate", { pct: true, note: "On gain above the §121 cap" })
     ]);
 
+    // permanent financing: construction loan rolls into this at completion,
+    // sized to construction cost only — the cash-bought lot is the equity.
+    var financeGrid = U.el("div", { class: "field-grid" }, [
+      field("mortgageRate", "Mortgage rate", { pct: true }),
+      field("mortgageTermYears", "Mortgage term", { post: "yrs" }),
+      field("propertyTaxRate", "Property tax rate", { pct: true, note: "% of value / yr" }),
+      field("homeInsuranceRate", "Homeowners insurance", { pct: true, note: "% of value / yr" }),
+      field("pmiRate", "PMI rate", { pct: true, note: "Applied only if LTV > 80%" })
+    ]);
+
     var inputPanel = U.el("section", { class: "panel" }, [
       U.el("div", { class: "panel-head" }, [
         U.el("h2", { text: "Listing" }),
@@ -767,7 +852,9 @@
       ]),
       urlRow, statusHost, listingGrid,
       U.el("div", { class: "bb-subhead" }, [U.el("h3", { text: "Build assumptions" })]),
-      assumpGrid
+      assumpGrid,
+      U.el("div", { class: "bb-subhead" }, [U.el("h3", { text: "Permanent financing" })]),
+      financeGrid
     ]);
 
     resultHost = U.el("div", { class: "bb-result" });
