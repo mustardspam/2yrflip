@@ -27,9 +27,14 @@ supabase secrets set APP_PASSCODE=choose-a-strong-passcode     # gates all acces
 supabase secrets set MONTHLY_CALL_CAP=48                       # hard cap (~22 lookups)
 # Lock CORS to your Pages origin (recommended). Use * only for local testing.
 supabase secrets set ALLOWED_ORIGIN=https://mustardspam.github.io
+# Optional — owner-only bypass for the monthly cap. Leave UNSET to disable the
+# bypass entirely. If set, pick something different from APP_PASSCODE and keep
+# it private: anyone who has it can run up real RentCast billing with no ceiling.
+supabase secrets set OWNER_OVERRIDE_KEY=pick-a-second-private-key
 ```
 
 > Dashboard equivalent: **Edge Functions → Secrets → Add secret** for each of the above.
+> `lotfinder` reads the same secrets — set them once, both functions see them.
 
 ## Lockdown (cost + access control)
 
@@ -42,6 +47,12 @@ The function is protected by three layers (see `index.ts`):
    Each lookup costs ~2 RentCast calls, so `48` ≈ ~22 lookups/month (safely under the free 50).
 3. **Address cache** — repeat lookups of the same address that month are served from cache and
    don't re-bill.
+
+**Owner cap override:** once the monthly limit is hit, the app shows an "Override cap" button
+that prompts for `OWNER_OVERRIDE_KEY` and retries with it sent as `x-owner-key`. This is
+deliberately a *second* secret, not the regular passcode — `APP_PASSCODE` always still respects
+the cap, so sharing the regular passcode (e.g. with a contractor) never grants cap-bypass power.
+Leave `OWNER_OVERRIDE_KEY` unset to disable the bypass entirely.
 
 **Required one-time DB setup** — run [`usage_setup.sql`](usage_setup.sql) in
 **Supabase → SQL Editor** before/after deploying. It creates the usage counter + cache tables

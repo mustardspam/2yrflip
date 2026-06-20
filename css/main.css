@@ -238,6 +238,7 @@ h1, h2, h3, h4 { margin: 0; font-weight: 650; }
   margin: var(--sp-6) 0 var(--sp-3);
 }
 .section-title h2 { font-size: var(--fs-lg); }
+.is-hidden { display: none !important; }
 .empty {
   border: 1px dashed var(--line);
   border-radius: var(--radius);

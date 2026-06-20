@@ -25,7 +25,7 @@
 //      function to bypass the existing lockdown.
 //
 // Secrets: shared with buybox (same Supabase project) —
-//   RENTCAST_KEY, APP_PASSCODE, MONTHLY_CALL_CAP, ALLOWED_ORIGIN
+//   RENTCAST_KEY, APP_PASSCODE, MONTHLY_CALL_CAP, ALLOWED_ORIGIN, OWNER_OVERRIDE_KEY
 // ------------------------------------------------------------
 // Requires the SAME usage_setup.sql tables/RPCs as buybox.
 // ============================================================
@@ -34,6 +34,7 @@ const RENTCAST_KEY = Deno.env.get("RENTCAST_KEY") ?? "";
 const APP_PASSCODE = Deno.env.get("APP_PASSCODE") ?? "";
 const CAP_RAW = parseInt(Deno.env.get("MONTHLY_CALL_CAP") ?? "48", 10);
 const CAP = Number.isFinite(CAP_RAW) && CAP_RAW > 0 ? CAP_RAW : 48;
+const OWNER_OVERRIDE_KEY = Deno.env.get("OWNER_OVERRIDE_KEY") ?? "";
 const ALLOWED_ORIGIN = Deno.env.get("ALLOWED_ORIGIN") ?? "*";
 const SB_URL = Deno.env.get("SUPABASE_URL") ?? "";
 const SB_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
@@ -51,7 +52,7 @@ function cors(origin: string) {
   return {
     "Access-Control-Allow-Origin": origin,
     "Access-Control-Allow-Methods": "POST, OPTIONS",
-    "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-app-pass",
+    "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-app-pass, x-owner-key",
     "Content-Type": "application/json",
   };
 }
@@ -89,6 +90,14 @@ async function releaseUsage(month: string, n: number): Promise<void> {
   try {
     await pg("rpc/release_usage", { method: "POST", body: JSON.stringify({ p_month: month, p_n: n }) });
   } catch { /* ignore */ }
+}
+// Owner-override path: add N unconditionally, no cap check. Returns the new total.
+async function addUsage(month: string, n: number): Promise<number> {
+  try {
+    const r = await pg("rpc/add_usage", { method: "POST", body: JSON.stringify({ p_month: month, p_n: n }) });
+    if (!r.ok) return 0;
+    return Number(await r.json()) || 0;
+  } catch { return 0; }
 }
 async function cacheGet(addr: string, month: string): Promise<any | null> {
   try {
@@ -217,8 +226,15 @@ Deno.serve(async (req) => {
   const month = monthKey();
 
   // Reserve worst case (1 bulk pull + K comp calls) up front; release what's unused below.
+  // Owner override (x-owner-key) skips the cap check entirely — see OWNER_OVERRIDE_KEY note above.
   const RESERVE_N = 1 + SHORTLIST_K;
-  const { ok: capOk, count: reservedAt } = await tryReserve(month, RESERVE_N);
+  const ownerOverride = !!OWNER_OVERRIDE_KEY && req.headers.get("x-owner-key") === OWNER_OVERRIDE_KEY;
+  let capOk: boolean, reservedAt: number;
+  if (ownerOverride) {
+    capOk = true; reservedAt = await addUsage(month, RESERVE_N);
+  } else {
+    ({ ok: capOk, count: reservedAt } = await tryReserve(month, RESERVE_N));
+  }
   if (!capOk) {
     return new Response(JSON.stringify({
       error: `Monthly lookup limit reached (${CAP} RentCast calls). Resets on the 1st.`,

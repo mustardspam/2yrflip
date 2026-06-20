@@ -43,7 +43,7 @@
   var assumptions = Object.assign({}, ASSUMPTION_DEFAULTS);
 
   var els = {};              // input element refs
-  var resultHost = null, savedHost = null, statusHost = null;
+  var resultHost = null, savedHost = null, statusHost = null, ownerBtn = null;
 
   // computeDeal/floodScore/floodTone now live in dealMath.js, shared with Lot Finder.
   function computeDeal() { return DealMath.computeDeal(listing, assumptions); }
@@ -116,6 +116,16 @@
     return p;
   }
 
+  // Owner-only cap bypass — separate from the regular passcode on purpose.
+  // Only appears as an option after the server actually reports the cap is hit.
+  function getOwnerKey() { return localStorage.getItem("owner_key") || ""; }
+  function enterOwnerKey() {
+    var k = (window.prompt("Enter the owner override key (bypasses the monthly cap for this lookup):") || "").trim();
+    if (!k) return;
+    localStorage.setItem("owner_key", k);
+    analyze();
+  }
+
   function analyze() {
     listing.url = els.url.value.trim();
     var cfg = window.BUYBOX_CONFIG || {};
@@ -137,13 +147,16 @@
     if (!pass) { status("Passcode required for live lookups.", "warn"); return; }
     status("Analyzing…", "loading");
 
+    if (ownerBtn) ownerBtn.classList.add("is-hidden");
+
     fetch(cfg.FUNCTION_URL, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         "Authorization": "Bearer " + (cfg.SUPABASE_ANON_KEY || ""),
         "apikey": cfg.SUPABASE_ANON_KEY || "",
-        "x-app-pass": pass
+        "x-app-pass": pass,
+        "x-owner-key": getOwnerKey()
       },
       body: JSON.stringify(listing.url
         ? { url: listing.url }
@@ -158,6 +171,7 @@
       }
       if (r.status === 429) {
         status(r.j.error || "Monthly lookup limit reached. Enter details manually.", "error");
+        if (ownerBtn) ownerBtn.classList.remove("is-hidden");
         return;
       }
       if (!r.ok) { status(r.j.error || "Lookup failed. Enter details manually below.", "error"); return; }
@@ -626,7 +640,9 @@
     els.url = U.el("input", { id: "bb_url", type: "text", placeholder: "Paste a Zillow listing URL…" });
     var analyzeBtn = U.el("button", { class: "btn btn--primary", type: "button", onclick: analyze }, ["Analyze"]);
     var resetBtn = U.el("button", { class: "btn btn--ghost", type: "button", onclick: reset, title: "Clear all fields and start fresh" }, ["Reset"]);
-    var urlRow = U.el("div", { class: "bb-urlrow" }, [els.url, analyzeBtn, resetBtn]);
+    ownerBtn = U.el("button", { class: "btn btn--ghost is-hidden", type: "button", onclick: enterOwnerKey,
+      title: "Owner-only: bypasses the monthly RentCast cap for this lookup" }, ["Override cap"]);
+    var urlRow = U.el("div", { class: "bb-urlrow" }, [els.url, analyzeBtn, resetBtn, ownerBtn]);
     statusHost = U.el("div", { class: "bb-status", id: "bb_status" });
 
     // listing facts (editable — doubles as manual entry)

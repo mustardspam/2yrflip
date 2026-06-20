@@ -21,7 +21,7 @@
   var assumptions = Object.assign({}, DealMath.ASSUMPTION_DEFAULTS);
 
   var els = {};
-  var resultHost = null, statusHost = null, scanHost = null;
+  var resultHost = null, statusHost = null, scanHost = null, ownerBtn = null;
   var map = null, centerMarker = null, radiusCircle = null;
   var resultMarkers = [];
   var lastCandidates = []; // raw listing+comp data from the last search, before scoring
@@ -111,6 +111,15 @@
     return p;
   }
 
+  // Owner-only cap bypass — same key/mechanism as Buy Box, shared via localStorage.
+  function getOwnerKey() { return localStorage.getItem("owner_key") || ""; }
+  function enterOwnerKey() {
+    var k = (window.prompt("Enter the owner override key (bypasses the monthly cap for this search):") || "").trim();
+    if (!k) return;
+    localStorage.setItem("owner_key", k);
+    confirmAndSearch();
+  }
+
   function status(msg, kind) {
     if (!statusHost) return;
     statusHost.textContent = msg || "";
@@ -172,6 +181,7 @@
 
     var pass = getPass();
     if (!pass) { status("Passcode required for live search.", "warn"); return; }
+    if (ownerBtn) ownerBtn.classList.add("is-hidden");
 
     fetch(cfg.FUNCTION_URL, {
       method: "POST",
@@ -179,7 +189,8 @@
         "Content-Type": "application/json",
         "Authorization": "Bearer " + (cfg.SUPABASE_ANON_KEY || ""),
         "apikey": cfg.SUPABASE_ANON_KEY || "",
-        "x-app-pass": pass
+        "x-app-pass": pass,
+        "x-owner-key": getOwnerKey()
       },
       body: JSON.stringify({
         lat: searchParams.centerLat, lng: searchParams.centerLng,
@@ -193,7 +204,11 @@
         status("Passcode rejected. Click Search to re-enter it.", "error");
         return;
       }
-      if (r.status === 429) { status(r.j.error || "Monthly lookup limit reached.", "error"); return; }
+      if (r.status === 429) {
+        status(r.j.error || "Monthly lookup limit reached.", "error");
+        if (ownerBtn) ownerBtn.classList.remove("is-hidden");
+        return;
+      }
       if (!r.ok) { status(r.j.error || "Search failed.", "error"); return; }
       applyResponse(r.j);
       var u = r.j.usage;
@@ -419,6 +434,8 @@
     ]);
 
     var searchBtn = U.el("button", { class: "btn btn--primary", type: "button", onclick: confirmAndSearch }, ["Search this area"]);
+    ownerBtn = U.el("button", { class: "btn btn--ghost is-hidden", type: "button", onclick: enterOwnerKey,
+      title: "Owner-only: bypasses the monthly RentCast cap for this search" }, ["Override cap"]);
 
     var inputPanel = U.el("section", { class: "panel" }, [
       U.el("div", { class: "panel-head" }, [
@@ -432,7 +449,7 @@
       financeGrid,
       U.el("div", { class: "bb-subhead" }, [U.el("h3", { text: "Search filters" })]),
       filterGrid,
-      U.el("div", { class: "input-actions" }, [searchBtn])
+      U.el("div", { class: "input-actions" }, [searchBtn, ownerBtn])
     ]);
 
     resultHost = U.el("div", { class: "lf-results" });

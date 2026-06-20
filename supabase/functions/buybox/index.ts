@@ -10,10 +10,15 @@
 //   5. RentCast listing + AVM comps; FEMA NFHL flood zone.
 //
 // Secrets (Edge Functions → Secrets):
-//   RENTCAST_KEY       — RentCast API key            (required)
-//   APP_PASSCODE       — shared access passcode       (required to lock)
-//   MONTHLY_CALL_CAP   — max RentCast calls / month   (optional, default 48)
-//   ALLOWED_ORIGIN     — CORS origin                  (optional, default *)
+//   RENTCAST_KEY        — RentCast API key            (required)
+//   APP_PASSCODE        — shared access passcode       (required to lock)
+//   MONTHLY_CALL_CAP    — max RentCast calls / month   (optional, default 48)
+//   ALLOWED_ORIGIN      — CORS origin                  (optional, default *)
+//   OWNER_OVERRIDE_KEY  — owner-only cap bypass         (optional; unset = no bypass exists)
+//     Distinct from APP_PASSCODE on purpose: APP_PASSCODE just gates access and
+//     still always respects the cap. OWNER_OVERRIDE_KEY, sent as the x-owner-key
+//     header, skips the cap check for that one request. Keep it private — anyone
+//     who has it can run up real RentCast billing with no ceiling.
 // Auto-injected by Supabase: SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY
 // ------------------------------------------------------------
 // Requires usage_setup.sql to have been run once.
@@ -24,6 +29,7 @@ const APP_PASSCODE = Deno.env.get("APP_PASSCODE") ?? "";
 const CAP_RAW = parseInt(Deno.env.get("MONTHLY_CALL_CAP") ?? "48", 10);
 // Guard: a misconfigured (NaN / <=0) cap must NOT silently disable the limit.
 const CAP = Number.isFinite(CAP_RAW) && CAP_RAW > 0 ? CAP_RAW : 48;
+const OWNER_OVERRIDE_KEY = Deno.env.get("OWNER_OVERRIDE_KEY") ?? "";
 const ALLOWED_ORIGIN = Deno.env.get("ALLOWED_ORIGIN") ?? "*";
 const SB_URL = Deno.env.get("SUPABASE_URL") ?? "";
 const SB_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
@@ -36,7 +42,7 @@ function cors(origin: string) {
   return {
     "Access-Control-Allow-Origin": origin,
     "Access-Control-Allow-Methods": "POST, OPTIONS",
-    "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-app-pass",
+    "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-app-pass, x-owner-key",
     "Content-Type": "application/json",
   };
 }
@@ -70,6 +76,14 @@ async function tryReserve(month: string, n: number): Promise<{ ok: boolean; coun
     const res = await r.json();
     return { ok: res.ok ?? false, count: Number(res.count) || 0 };
   } catch { return { ok: false, count: 0 }; }
+}
+// Owner-override path: add N unconditionally, no cap check. Returns the new total.
+async function addUsage(month: string, n: number): Promise<number> {
+  try {
+    const r = await pg("rpc/add_usage", { method: "POST", body: JSON.stringify({ p_month: month, p_n: n }) });
+    if (!r.ok) return 0;
+    return Number(await r.json()) || 0;
+  } catch { return 0; }
 }
 // Release over-reserved slots after actual call count is known.
 async function releaseUsage(month: string, n: number): Promise<void> {
@@ -227,7 +241,15 @@ Deno.serve(async (req) => {
   // 3) hard monthly cap — atomically reserve up to 3 slots before touching RentCast.
   // tryReserve increments then rolls back if the new total exceeds CAP, so two
   // concurrent requests can't both pass a cap that's about to be hit.
-  const { ok: capOk, count: reservedAt } = await tryReserve(month, 3);
+  // Owner override (x-owner-key) skips the cap check entirely for this request —
+  // see the OWNER_OVERRIDE_KEY note at the top of the file.
+  const ownerOverride = !!OWNER_OVERRIDE_KEY && req.headers.get("x-owner-key") === OWNER_OVERRIDE_KEY;
+  let capOk: boolean, reservedAt: number;
+  if (ownerOverride) {
+    capOk = true; reservedAt = await addUsage(month, 3);
+  } else {
+    ({ ok: capOk, count: reservedAt } = await tryReserve(month, 3));
+  }
   if (!capOk) {
     return new Response(JSON.stringify({
       error: `Monthly lookup limit reached (${CAP} RentCast calls). Resets on the 1st. Edit fields manually to keep going.`,
