@@ -1,0 +1,85 @@
+/* ============================================================
+   lotfinder.css — Lot Finder tab (map, area controls, result cards)
+   Reuses .panel / .field / .bb-status / .bb-urlrow / .bb-subhead /
+   .calc-grid / .results-panel / .label-cap from main+calculator+buybox.
+   ============================================================ */
+
+.lf-map {
+  height: 260px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--line);
+  margin-bottom: var(--sp-3);
+  background: var(--line-soft);
+}
+
+.lf-radius-row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  margin-bottom: var(--sp-3);
+}
+.lf-radius-row input[type="range"] { flex: 1; }
+.lf-radius-out {
+  font-size: var(--fs-sm);
+  font-weight: 700;
+  color: var(--ink);
+  min-width: 48px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.lf-results { display: flex; flex-direction: column; gap: var(--sp-3); }
+
+.lf-card {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: #fff;
+  padding: var(--sp-4);
+  box-shadow: var(--shadow-sm);
+  transition: box-shadow 0.4s;
+}
+.lf-card.is-pulse { box-shadow: 0 0 0 3px var(--gold-soft); }
+.lf-card--ok { border-color: #bfe6d3; background: linear-gradient(180deg, #f5fbf8, #fff); }
+.lf-card--warn { border-color: #ecd9a6; background: linear-gradient(180deg, #fdf9ef, #fff); }
+.lf-card--bad { border-color: var(--line); opacity: 0.92; }
+
+.lf-card__head { display: flex; justify-content: space-between; align-items: flex-start; gap: var(--sp-3); }
+.lf-card__addr { font-size: var(--fs-sm); font-weight: 700; color: var(--ink); }
+.lf-card__sub { font-size: var(--fs-xs); color: var(--muted); margin-top: 1px; }
+.lf-card__verdict { display: flex; align-items: center; gap: 8px; flex: none; }
+.lf-card__verdict-label { font-size: var(--fs-xs); font-weight: 800; }
+
+.lf-dial {
+  width: 32px; height: 32px;
+  border-radius: 50%;
+  border: 3px solid;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 11px; font-weight: 800;
+  flex: none;
+}
+
+.lf-card__metrics { display: flex; gap: var(--sp-5); margin: var(--sp-3) 0; }
+.lf-card__metric { font-size: var(--fs-lg); font-weight: 800; color: var(--ink); margin-top: 2px; }
+.lf-card__metric.is-neg { color: var(--red); }
+.lf-card__btn { font-size: var(--fs-xs); padding: 6px 12px; }
+
+.lf-collapse {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  background: #fafbfc;
+}
+.lf-collapse__head {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: var(--sp-2) var(--sp-3);
+  font-size: var(--fs-sm); font-weight: 600; color: var(--muted);
+  cursor: pointer;
+}
+.lf-collapse__chev { transition: transform 0.2s; }
+.lf-collapse__head.is-open .lf-collapse__chev { transform: rotate(180deg); }
+.lf-collapse__body { padding: 0 var(--sp-3) var(--sp-3); display: flex; flex-direction: column; gap: var(--sp-3); }
+.lf-collapse__body.is-hidden { display: none; }
+
+@media (max-width: 560px) {
+  .lf-card__metrics { flex-wrap: wrap; gap: var(--sp-3); }
+}

@@ -19,3 +19,11 @@ window.BUYBOX_CONFIG = {
   // false = call the live Edge Function
   USE_MOCK: false
 };
+
+// Lot Finder shares the same project, anon key, and passcode as Buy Box —
+// it's a sibling Edge Function (lotfinder), not a separate backend.
+window.LOTFINDER_CONFIG = {
+  FUNCTION_URL: "https://wdotsvctjpqxtvcetxdo.supabase.co/functions/v1/lotfinder",
+  SUPABASE_ANON_KEY: window.BUYBOX_CONFIG.SUPABASE_ANON_KEY,
+  USE_MOCK: false
+};

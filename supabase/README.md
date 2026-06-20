@@ -100,3 +100,31 @@ curl -X POST "https://<ref>.supabase.co/functions/v1/buybox" \
   ATTOM, Bridge/MLS, etc., change those two functions; the response shape stays the same.
 - **Free tiers:** RentCast ~50 req/mo; Supabase Edge Functions 500K invocations/mo. The
   frontend caches lookups by address in `localStorage` to conserve quota.
+
+## Lot Finder (`lotfinder` function)
+
+The Lot Finder tab is an area search — drop a pin + radius, get back raw-land candidates
+with comps already attached. It's a **sibling function in the same project**, not a separate
+backend: it reads the exact same secrets (`RENTCAST_KEY`, `APP_PASSCODE`, `MONTHLY_CALL_CAP`,
+`ALLOWED_ORIGIN`) and writes to the same `api_usage` / `buybox_cache` tables, so there's nothing
+new to configure beyond deploying it.
+
+**Cost control, by design:** one cheap bulk land-listing pull, then comps are fetched for at
+most the top **10** candidates (by price) regardless of how many listings the radius contains.
+All of that spend (1 + up to 10 calls) is reserved against the **same monthly cap** as Buy Box
+via the existing `try_reserve`/`release_usage` RPCs — there is no separate budget to bypass the
+lockdown already in place. Per-address comp lookups also write into `buybox_cache`, so a lot
+already analyzed this month (via either tab) is served free on a repeat hit.
+
+Deploy it the same way as `buybox`:
+```bash
+supabase functions deploy lotfinder --no-verify-jwt
+```
+(Dashboard equivalent: Edge Functions → lotfinder → Details → **Enforce JWT Verification** OFF.)
+
+No additional SQL setup is needed — it uses the same `usage_setup.sql` tables `buybox` already
+created.
+
+Frontend wiring is in `js/config.js` under `window.LOTFINDER_CONFIG`, same shape as
+`BUYBOX_CONFIG`. Set `USE_MOCK: true` to demo the map/search/results flow without calling
+RentCast at all.

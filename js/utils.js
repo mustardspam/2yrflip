@@ -56,6 +56,39 @@
     });
   }
 
+  // Round a decimal (0.065) to a clean percent-input value (6.5) for display.
+  function pctInput(dec) { return Math.round(parseNum(dec) * 100 * 1e4) / 1e4; }
+
+  // Shared labeled-input builder used by Buy Box + Lot Finder field grids.
+  // els: the module's id->element map to populate; prefix: id namespace (e.g. "bb", "lf").
+  function field(els, prefix, key, label, opts) {
+    opts = opts || {};
+    var id = prefix + "_" + key;
+    var control;
+    if (opts.type === "select") {
+      control = el("select", { id: id }, opts.options.map(function (o) {
+        return el("option", { value: o[0], text: o[1] });
+      }));
+    } else {
+      var attrs = { id: id, type: opts.text ? "text" : "number" };
+      if (opts.placeholder) attrs.placeholder = opts.placeholder;
+      if (!opts.text) { attrs.step = "any"; attrs.min = "0"; }
+      control = el("input", attrs);
+    }
+    els[key] = control;
+
+    var cls = "input-wrap", pre = null, post = null;
+    if (opts.money) { cls += " has-pre"; pre = el("span", { class: "affix affix--pre", text: "$" }); }
+    if (opts.pct) { cls += " has-post"; post = el("span", { class: "affix affix--post", text: "%" }); }
+    if (opts.post) { cls += " has-post"; post = el("span", { class: "affix affix--post", text: opts.post }); }
+
+    return el("div", { class: "field" + (opts.full ? " field--full" : "") }, [
+      el("label", { for: id, text: label }),
+      el("div", { class: cls }, [pre, control, post]),
+      opts.note ? el("div", { class: "field__note", id: id + "_note", text: opts.note }) : null
+    ]);
+  }
+
   function el(tag, attrs, children) {
     var node = document.createElement(tag);
     if (attrs) {
@@ -84,6 +117,8 @@
     fmtSqft: fmtSqft,
     parseNum: parseNum,
     clamp: clamp,
+    pctInput: pctInput,
+    field: field,
     uuid: uuid,
     el: el
   };

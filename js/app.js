@@ -92,6 +92,11 @@
         function (panel) { window.BuyBox.tab.init(panel); });
     }
 
+    if (window.LotFinder) {
+      registerTab(window.LotFinder.tab.id, window.LotFinder.tab.label,
+        function (panel) { window.LotFinder.tab.init(panel); });
+    }
+
     registerTab(window.Compare.tab.id, window.Compare.tab.label,
       function (panel) { window.Compare.tab.init(panel); });
 
